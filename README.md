@@ -19,7 +19,7 @@ A Python tool that analyzes the Warframe Market API to find profitable item sets
 
 ### Option 1: Simple Download (Windows)
 
-1. [Download the latest release](https://github.com/yourusername/warframe-market-analyzer/releases/latest)
+1. [Download the latest release](https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/releases/tag/v0.1.0) 
 2. Extract the ZIP file to any folder
 3. Double-click `run-analyzer.bat`
 4. The script will automatically:
