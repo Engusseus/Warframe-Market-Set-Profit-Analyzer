@@ -11,6 +11,17 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
 
+from config import (
+    API_BASE_URL,
+    REQUESTS_PER_SECOND,
+    HEADERS,
+    OUTPUT_FILE,
+    DEBUG_MODE,
+    PROFIT_WEIGHT,
+    VOLUME_WEIGHT,
+    PRICE_SAMPLE_SIZE,
+)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -22,21 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
-API_BASE_URL = 'https://api.warframe.market'
-REQUESTS_PER_SECOND = 3  # Rate limit to avoid API throttling
-HEADERS = {
-    'Platform': 'pc',
-    'Language': 'en',
-    'Accept': 'application/json',
-    'Crossplay': 'true'  # Enable crossplay to get all relevant orders
-}
-OUTPUT_FILE = 'set_profit_analysis.csv'
-DEBUG_MODE = True  # Enable detailed logging
-
-# Weight for scoring calculation
-PROFIT_WEIGHT = 1.0
-VOLUME_WEIGHT = 1.2
+# Configuration is now loaded from config.py
 
 
 @dataclass
@@ -267,7 +264,7 @@ class SetProfitAnalyzer:
 
         return orders
 
-    def calculate_average_price(self, orders: List[Dict], order_type: str, count: int = 2) -> Optional[float]:
+    def calculate_average_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
         """
         Calculate the average price from the lowest/highest N prices
 
