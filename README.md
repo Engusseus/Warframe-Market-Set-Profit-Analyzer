@@ -95,3 +95,14 @@ MIT License. See [LICENSE](LICENSE) file for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Platinum Strategy UI
+
+This repository now includes a lightweight Flutter application under
+`platinum_strategy_ui/` which visualizes a mean-reversion trading strategy
+for Warframe platinum prices. The UI plots historical price data with a
+rolling mean, upper and lower deviation bands, and buy/sell markers where
+the price crosses those bands. Basic stationarity testing highlights whether
+the series appears mean-reverting.
+
+Run `flutter pub get` inside the directory to fetch dependencies before building.
