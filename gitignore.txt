@@ -36,3 +36,7 @@ env/
 *.log
 set_profit_analysis.csv
 set_profit_analysis_detailed.json
+# Flutter
+.platinum_strategy_ui.dart_tool/
+.platinum_strategy_ui.packages/
+platinum_strategy_ui/build/
