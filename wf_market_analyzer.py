@@ -80,6 +80,7 @@ class WarframeMarketAPI:
         self.session = None
         self.last_request_time = 0
         self.request_interval = 1.0 / REQUESTS_PER_SECOND
+        self._lock = asyncio.Lock()
 
     async def initialize(self):
         """Create the HTTP session"""
@@ -92,11 +93,12 @@ class WarframeMarketAPI:
 
     async def _rate_limit(self):
         """Enforce rate limiting between requests"""
-        now = time.time()
-        elapsed = now - self.last_request_time
-        if elapsed < self.request_interval:
-            await asyncio.sleep(self.request_interval - elapsed)
-        self.last_request_time = time.time()
+        async with self._lock:
+            now = time.time()
+            elapsed = now - self.last_request_time
+            if elapsed < self.request_interval:
+                await asyncio.sleep(self.request_interval - elapsed)
+            self.last_request_time = time.time()
 
     async def get(self, endpoint: str, max_retries: int = 3) -> Optional[Dict]:
         """
@@ -440,6 +442,30 @@ class SetProfitAnalyzer:
 
         return results
 
+    async def process_set(self, set_item: Dict) -> Optional[ResultData]:
+        """Process a single set and return its analysis result"""
+        set_slug = set_item['slug']
+
+        # Fetch set data (parts and quantities)
+        set_data = await self.fetch_set_data(set_slug)
+        if not set_data:
+            return None
+
+        # Calculate profit
+        price_data = await self.calculate_set_profit(set_data)
+        if not price_data:
+            return None
+
+        # Fetch volume data
+        volume_data = await self.fetch_volume_data(set_slug)
+
+        return ResultData(
+            set_data=set_data,
+            price_data=price_data,
+            volume_data=volume_data,
+            score=0  # Will be calculated after normalization
+        )
+
     async def analyze_all_sets(self):
         """Main function to analyze all sets and calculate profits"""
         logger.info("Starting set profit analysis...")
@@ -451,34 +477,13 @@ class SetProfitAnalyzer:
         set_items = [item for item in items if 'set' in item.get('tags', [])]
         logger.info(f"Found {len(set_items)} sets to analyze")
 
+        tasks = [asyncio.create_task(self.process_set(item)) for item in set_items]
+
         results = []
-
-        # Process each set with a progress bar
-        for set_item in tqdm(set_items, desc="Analyzing sets"):
-            set_slug = set_item['slug']
-
-            # Fetch set data (parts and quantities)
-            set_data = await self.fetch_set_data(set_slug)
-            if not set_data:
-                continue
-
-            # Calculate profit
-            price_data = await self.calculate_set_profit(set_data)
-            if not price_data:
-                continue
-
-            # Fetch volume data
-            volume_data = await self.fetch_volume_data(set_slug)
-
-            # Store result
-            result = ResultData(
-                set_data=set_data,
-                price_data=price_data,
-                volume_data=volume_data,
-                score=0  # Will be calculated after normalization
-            )
-
-            results.append(result)
+        for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Analyzing sets"):
+            result = await future
+            if result:
+                results.append(result)
 
         # Normalize data and calculate scores
         results = self.normalize_data(results)
