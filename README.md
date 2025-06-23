@@ -70,12 +70,14 @@ The script will:
 
 ## Configuration
 
-Edit the constants at the top of `wf_market_analyzer.py` to customize:
+Adjust the values in `config.py` to customize how the analyzer behaves:
 
-- `PROFIT_WEIGHT` and `VOLUME_WEIGHT`: Adjust the balance between profit and volume in scoring
-- `REQUESTS_PER_SECOND`: Control API request rate (default: 2)
-- `OUTPUT_FILE`: Change the output file name
-- `DEBUG_MODE`: Enable/disable detailed logging
+- `API_BASE_URL`: Base URL for the Warframe Market API
+- `REQUESTS_PER_SECOND`: Control the request rate
+- `PROFIT_WEIGHT` and `VOLUME_WEIGHT`: Balance profit versus volume in the score
+- `OUTPUT_FILE`: File path for the generated CSV
+- `DEBUG_MODE`: Enable or disable detailed logging
+- `PRICE_SAMPLE_SIZE`: Number of orders to average when calculating prices
 
 ## How Scoring Works
 
