@@ -61,6 +61,14 @@ Run the analyzer:
 python wf_market_analyzer.py
 ```
 
+You can override settings directly from the command line. For example, to use
+the Xbox market and change the scoring weights:
+
+```
+python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
+    --profit-weight 1.0 --volume-weight 1.5
+```
+
 The script will:
 1. Fetch all tradable item sets
 2. Calculate profit margins for each set
