@@ -36,3 +36,4 @@ env/
 *.log
 set_profit_analysis.csv
 set_profit_analysis_detailed.json
+data/*.json

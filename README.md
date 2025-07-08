@@ -61,12 +61,20 @@ Run the analyzer:
 python wf_market_analyzer.py
 ```
 
+To analyze trading volume trends, provide the `--trend-days` option:
+
+```
+python wf_market_analyzer.py --trend-days 30
+```
+
 The script will:
 1. Fetch all tradable item sets
 2. Calculate profit margins for each set
 3. Track 48-hour trading volume
 4. Generate a score based on profit and volume
 5. Save results to `set_profit_analysis.csv`
+
+API responses are cached in the `data/` directory using daily JSON files to reduce load on the Warframe Market servers.
 
 ## Configuration
 
