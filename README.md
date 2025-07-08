@@ -77,7 +77,8 @@ Adjust the values in `config.py` to customize how the analyzer behaves:
 - `PROFIT_WEIGHT` and `VOLUME_WEIGHT`: Balance profit versus volume in the score
 - `OUTPUT_FILE`: File path for the generated CSV
 - `DEBUG_MODE`: Enable or disable detailed logging
-- `PRICE_SAMPLE_SIZE`: Number of orders to average when calculating prices
+- `PRICE_SAMPLE_SIZE`: Number of orders to sample when calculating prices
+- `USE_MEDIAN_PRICING`: Use the median price of the sampled orders instead of the average
 
 ## How Scoring Works
 

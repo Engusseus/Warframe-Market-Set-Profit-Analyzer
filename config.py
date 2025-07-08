@@ -20,5 +20,8 @@ DEBUG_MODE = True  # Enable detailed logging
 PROFIT_WEIGHT = 1.0
 VOLUME_WEIGHT = 1.2
 
-# Get average prices from this many orders
+# Get average/median prices from this many orders
 PRICE_SAMPLE_SIZE = 2
+
+# Use median pricing instead of averaging when calculating prices
+USE_MEDIAN_PRICING = False
