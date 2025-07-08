@@ -16,6 +16,7 @@ from config import (
     REQUESTS_PER_SECOND,
     HEADERS,
     OUTPUT_FILE,
+    OUTPUT_FORMAT,
     DEBUG_MODE,
     PROFIT_WEIGHT,
     VOLUME_WEIGHT,
@@ -491,9 +492,10 @@ class SetProfitAnalyzer:
         self.results = results
         logger.info(f"Analysis complete. Found {len(results)} profitable sets.")
 
-    def save_to_csv(self):
-        """Save results to CSV file"""
-        logger.info(f"Saving results to {OUTPUT_FILE}")
+    def save_results(self):
+        """Save results to CSV or XLSX file based on configuration"""
+        output_name = OUTPUT_FILE if OUTPUT_FORMAT.lower() == 'csv' else OUTPUT_FILE.replace('.csv', '.xlsx')
+        logger.info(f"Saving results to {output_name}")
 
         # Prepare data for CSV
         csv_data = []
@@ -516,10 +518,13 @@ class SetProfitAnalyzer:
             }
             csv_data.append(row)
 
-        # Create DataFrame and save to CSV
+        # Create DataFrame and save in chosen format
         df = pd.DataFrame(csv_data)
-        df.to_csv(OUTPUT_FILE, index=False)
-        logger.info(f"Results saved to {OUTPUT_FILE}")
+        if OUTPUT_FORMAT.lower() == 'xlsx':
+            df.to_excel(output_name, index=False)
+        else:
+            df.to_csv(output_name, index=False)
+        logger.info(f"Results saved to {output_name}")
 
         # Save detailed JSON for debugging
         if DEBUG_MODE:
@@ -567,7 +572,7 @@ async def main():
     try:
         await analyzer.initialize()
         await analyzer.analyze_all_sets()
-        analyzer.save_to_csv()
+        analyzer.save_results()
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}", exc_info=True)
     finally:
@@ -576,7 +581,8 @@ async def main():
 
 if __name__ == "__main__":
     print("=== Warframe Market Set Profit Analyzer ===")
-    print(f"Output will be saved to: {OUTPUT_FILE}")
+    output_name = OUTPUT_FILE if OUTPUT_FORMAT.lower() == 'csv' else OUTPUT_FILE.replace('.csv', '.xlsx')
+    print(f"Output will be saved to: {output_name}")
     print("Starting analysis...")
 
     asyncio.run(main())
