@@ -22,3 +22,6 @@ VOLUME_WEIGHT = 1.2
 
 # Get average prices from this many orders
 PRICE_SAMPLE_SIZE = 2
+
+# Directory where cached API responses are stored
+CACHE_DIR = 'data'
