@@ -14,6 +14,8 @@ HEADERS = {
 
 # Output Settings
 OUTPUT_FILE = 'set_profit_analysis.csv'
+# Choose 'csv' or 'xlsx'
+OUTPUT_FORMAT = 'csv'
 DEBUG_MODE = True  # Enable detailed logging
 
 # Scoring Settings
