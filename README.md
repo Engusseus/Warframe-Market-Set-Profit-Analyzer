@@ -7,7 +7,7 @@ A Python tool that analyzes the Warframe Market API to find profitable item sets
 - Fetches all tradable item sets from the Warframe Market API
 - Calculates potential profit for each set by comparing set prices to individual part prices
 - Tracks 48-hour trading volume for each set
-- Scores items based on a weighted combination of profit and volume
+- Scores items based on a weighted combination of profit, profit margin, and volume
 - Generates a CSV report ordered by score for easy decision-making
 
 ## Requirements
@@ -65,7 +65,7 @@ The script will:
 1. Fetch all tradable item sets
 2. Calculate profit margins for each set
 3. Track 48-hour trading volume
-4. Generate a score based on profit and volume
+4. Generate a score based on profit, profit margin, and volume
 5. Save results to `set_profit_analysis.csv`
 
 ## Configuration
@@ -74,7 +74,7 @@ Adjust the values in `config.py` to customize how the analyzer behaves:
 
 - `API_BASE_URL`: Base URL for the Warframe Market API
 - `REQUESTS_PER_SECOND`: Control the request rate
-- `PROFIT_WEIGHT` and `VOLUME_WEIGHT`: Balance profit versus volume in the score
+- `PROFIT_WEIGHT`, `VOLUME_WEIGHT`, and `PROFIT_MARGIN_WEIGHT`: Balance profit, profit margin, and trading volume in the score
 - `OUTPUT_FILE`: File path for the generated CSV
 - `DEBUG_MODE`: Enable or disable detailed logging
 - `PRICE_SAMPLE_SIZE`: Number of orders to average when calculating prices
@@ -83,8 +83,8 @@ Adjust the values in `config.py` to customize how the analyzer behaves:
 
 The tool calculates scores using the following methodology:
 
-1. Normalizes both profit and volume data (scaling to 0-1 range)
-2. Applies weights to each factor (default: 1.0× for profit, 1.2× for volume)
+1. Normalizes profit, profit margin, and volume data (scaling to 0-1 range)
+2. Applies weights to each factor (default: 1.0× for profit, 1.2× for volume, 0× for profit margin)
 3. Combines these values into a single score
 4. Ranks results in descending order by score
 
