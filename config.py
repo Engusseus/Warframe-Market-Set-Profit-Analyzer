@@ -26,7 +26,7 @@ PROFIT_MARGIN_WEIGHT = 0.0  # Set >0 to factor profit margin into scores
 # Get average/median prices from this many orders
 PRICE_SAMPLE_SIZE = 2
 
-codex/implement-lightweight-cache-layer
+# Placeholder for future caching layer
 # Directory where cached API responses are stored
 CACHE_DIR = 'data'
 

@@ -28,6 +28,17 @@ This project follows standard Python coding conventions:
    pip install -r requirements.txt
    ```
 
+## Running Tests
+
+This project uses `pytest` for its test suite. After installing the
+dependencies, simply run:
+
+```bash
+pytest
+```
+
+All tests are located in the `tests/` directory.
+
 ## Making Changes
 
 1. Create a feature branch:
