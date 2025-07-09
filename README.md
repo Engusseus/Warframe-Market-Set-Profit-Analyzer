@@ -8,7 +8,7 @@ A Python tool that analyzes the Warframe Market API to find profitable item sets
 - Calculates potential profit for each set by comparing set prices to individual part prices
 - Tracks 48-hour trading volume for each set
 - Scores items based on a weighted combination of profit and volume
-- Generates a CSV report ordered by score for easy decision-making
+- Generates a CSV or Excel (XLSX) report ordered by score for easy decision-making
 
 ## Requirements
 
@@ -27,7 +27,7 @@ A Python tool that analyzes the Warframe Market API to find profitable item sets
    - Set up a virtual environment
    - Install all required packages
    - Run the analyzer
-   - Save results to `set_profit_analysis.csv` in the same folder
+   - Save results to `set_profit_analysis.csv` (or `.xlsx` if configured) in the same folder
 
 ### Option 2: Manual Setup (All Platforms)
 
@@ -66,7 +66,7 @@ The script will:
 2. Calculate profit margins for each set
 3. Track 48-hour trading volume
 4. Generate a score based on profit and volume
-5. Save results to `set_profit_analysis.csv`
+5. Save results to `set_profit_analysis.csv` (or `.xlsx` depending on `OUTPUT_FORMAT`)
 
 ## Configuration
 
@@ -75,7 +75,8 @@ Adjust the values in `config.py` to customize how the analyzer behaves:
 - `API_BASE_URL`: Base URL for the Warframe Market API
 - `REQUESTS_PER_SECOND`: Control the request rate
 - `PROFIT_WEIGHT` and `VOLUME_WEIGHT`: Balance profit versus volume in the score
-- `OUTPUT_FILE`: File path for the generated CSV
+- `OUTPUT_FILE`: File path for the generated output file
+- `OUTPUT_FORMAT`: Choose `'csv'` or `'xlsx'` for the output format
 - `DEBUG_MODE`: Enable or disable detailed logging
 - `PRICE_SAMPLE_SIZE`: Number of orders to sample when calculating prices
 - `USE_MEDIAN_PRICING`: Use the median price of the sampled orders instead of the average

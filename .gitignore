@@ -35,4 +35,5 @@ env/
 # Project-specific
 *.log
 set_profit_analysis.csv
+set_profit_analysis.xlsx
 set_profit_analysis_detailed.json
