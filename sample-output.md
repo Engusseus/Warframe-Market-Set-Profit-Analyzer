@@ -22,5 +22,6 @@ _Note: This is example data and does not reflect actual in-game pricing._
 - **Profit Margin**: Profit divided by total part cost
 - **Score**: Combined normalized score of profit, profit margin, and volume (higher is better)
 - **Part Prices**: Breakdown of each part's price and quantity needed
+- A scatter plot `set_profit_analysis_profit_vs_volume.png` shows profit vs. volume
 
 The results are sorted by Score in descending order, showing the most profitable and frequently traded items at the top.

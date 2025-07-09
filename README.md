@@ -10,6 +10,7 @@ A Python tool that analyzes the Warframe Market API to find profitable item sets
 
 - Scores items based on a weighted combination of profit, profit margin, and volume
 - Generates a CSV report ordered by score for easy decision-making
+- Saves a scatter plot of profit vs. volume for quick visualization
 
 
 ## Requirements
@@ -30,6 +31,7 @@ A Python tool that analyzes the Warframe Market API to find profitable item sets
    - Install all required packages
    - Run the analyzer
    - Save results to `set_profit_analysis.csv` (or `.xlsx` if configured) in the same folder
+   - Generate `set_profit_analysis_profit_vs_volume.png` for a visual overview
 
 ### Option 2: Manual Setup (All Platforms)
 
@@ -79,6 +81,7 @@ The script will:
 
 4. Generate a score based on profit, profit margin, and volume
 5. Save results to `set_profit_analysis.csv`
+6. Generate `set_profit_analysis_profit_vs_volume.png`
 
 
 ## Configuration
