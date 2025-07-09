@@ -4,6 +4,7 @@
 import asyncio
 import aiohttp
 import pandas as pd
+import numpy as np
 import time
 import json
 import logging
@@ -18,11 +19,14 @@ from config import (
     REQUESTS_PER_SECOND,
     HEADERS,
     OUTPUT_FILE,
+    OUTPUT_FORMAT,
     DEBUG_MODE,
     PROFIT_WEIGHT,
     VOLUME_WEIGHT,
     PRICE_SAMPLE_SIZE,
+ codex/implement-lightweight-cache-layer
     CACHE_DIR,
+
 )
 
 # Configure logging
@@ -347,6 +351,31 @@ class SetProfitAnalyzer:
 
         return sum(prices) / len(prices)
 
+    def calculate_median_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
+        """Calculate the median price from the lowest/highest N prices."""
+        filtered_orders = [o for o in orders if o['order_type'] == order_type]
+
+        if len(filtered_orders) < count:
+            logger.warning(
+                f"Not enough {order_type} orders (found {len(filtered_orders)}, need {count})"
+            )
+            if not filtered_orders:
+                return None
+            count = len(filtered_orders)
+
+        sorted_orders = sorted(
+            filtered_orders,
+            key=lambda o: o['platinum'],
+            reverse=(order_type == 'buy'),
+        )
+
+        prices = [o['platinum'] for o in sorted_orders[:count]]
+
+        if DEBUG_MODE:
+            logger.debug(f"Using {order_type} prices for median: {prices}")
+
+        return float(np.median(prices))
+
     async def calculate_set_profit(self, set_data: SetData) -> Optional[PriceData]:
         """
         Calculate profit for a set
@@ -365,8 +394,11 @@ class SetProfitAnalyzer:
             logger.error(f"No orders found for set {set_data.slug}")
             return None
 
-        # Calculate average selling price for the set (from lowest 2 sell orders)
-        set_price = self.calculate_average_price(set_orders, 'sell')
+        # Calculate selling price for the set
+        if USE_MEDIAN_PRICING:
+            set_price = self.calculate_median_price(set_orders, 'sell')
+        else:
+            set_price = self.calculate_average_price(set_orders, 'sell')
         if set_price is None:
             logger.error(f"Could not calculate sell price for set {set_data.slug}")
             return None
@@ -384,8 +416,11 @@ class SetProfitAnalyzer:
                 missing_parts.append(part_slug)
                 continue
 
-            # Calculate average selling price for the part (from lowest 2 sell orders)
-            part_price = self.calculate_average_price(part_orders, 'sell')
+            # Calculate selling price for the part
+            if USE_MEDIAN_PRICING:
+                part_price = self.calculate_median_price(part_orders, 'sell')
+            else:
+                part_price = self.calculate_average_price(part_orders, 'sell')
             if part_price is None:
                 logger.warning(f"Could not calculate price for part {part_slug}")
                 missing_parts.append(part_slug)
@@ -578,9 +613,10 @@ class SetProfitAnalyzer:
         self.results = results
         logger.info(f"Analysis complete. Found {len(results)} profitable sets.")
 
-    def save_to_csv(self):
-        """Save results to CSV file"""
-        logger.info(f"Saving results to {OUTPUT_FILE}")
+    def save_results(self):
+        """Save results to CSV or XLSX file based on configuration"""
+        output_name = OUTPUT_FILE if OUTPUT_FORMAT.lower() == 'csv' else OUTPUT_FILE.replace('.csv', '.xlsx')
+        logger.info(f"Saving results to {output_name}")
 
         # Prepare data for CSV
         csv_data = []
@@ -604,10 +640,13 @@ class SetProfitAnalyzer:
             }
             csv_data.append(row)
 
-        # Create DataFrame and save to CSV
+        # Create DataFrame and save in chosen format
         df = pd.DataFrame(csv_data)
-        df.to_csv(OUTPUT_FILE, index=False)
-        logger.info(f"Results saved to {OUTPUT_FILE}")
+        if OUTPUT_FORMAT.lower() == 'xlsx':
+            df.to_excel(output_name, index=False)
+        else:
+            df.to_csv(output_name, index=False)
+        logger.info(f"Results saved to {output_name}")
 
         # Save detailed JSON for debugging
         if DEBUG_MODE:
@@ -668,7 +707,7 @@ async def main():
     try:
         await analyzer.initialize()
         await analyzer.analyze_all_sets()
-        analyzer.save_to_csv()
+        analyzer.save_results()
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}", exc_info=True)
     finally:
@@ -677,9 +716,11 @@ async def main():
 
 if __name__ == "__main__":
     print("=== Warframe Market Set Profit Analyzer ===")
+    codex/implement-lightweight-cache-layer
     print(f"Output will be saved to: {OUTPUT_FILE}")
     print("Starting analysis...")
 
     asyncio.run(main())
+
 
     print("Analysis complete!")
