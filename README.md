@@ -93,7 +93,7 @@ Adjust the values in `config.py` to customize how the analyzer behaves:
 
 - `DEBUG_MODE`: Enable or disable detailed logging
 - `PRICE_SAMPLE_SIZE`: Number of orders to sample when calculating prices
-- `USE_MEDIAN_PRICING`: Use the median price of the sampled orders instead of the average
+- `USE_MEDIAN_PRICING`: Use the median price of the sampled orders instead of the average (default: False)
 
 ## How Scoring Works
 
