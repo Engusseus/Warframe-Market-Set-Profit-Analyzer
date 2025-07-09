@@ -1,6 +1,7 @@
 # Sample Output
 
-Below is a sample of the CSV output format produced by the Warframe Market Set Profit Analyzer:
+Below is a sample of the CSV output format produced by the Warframe Market Set Profit Analyzer.
+If you choose the `xlsx` format, you'll get the same information in an Excel file:
 
 | Set Name | Profit | Set Selling Price | Part Costs Total | Volume (48h) | Score | Part Prices |
 |----------|--------|-------------------|------------------|--------------|-------|-------------|
