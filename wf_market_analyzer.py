@@ -1,15 +1,14 @@
 # Warframe Market Set Profit Analyzer
 # Identifies profitable item sets based on a combined score of profit and trading volume
 
+
+import argparse
 import asyncio
 import aiohttp
 import pandas as pd
-import numpy as np
 import time
 import json
 import logging
-import os
-import argparse
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -19,15 +18,12 @@ from config import (
     REQUESTS_PER_SECOND,
     HEADERS,
     OUTPUT_FILE,
-    OUTPUT_FORMAT,
     DEBUG_MODE,
     PROFIT_WEIGHT,
     VOLUME_WEIGHT,
     PRICE_SAMPLE_SIZE,
- codex/implement-lightweight-cache-layer
-    CACHE_DIR,
-
 )
+
 
 # Configure logging
 logging.basicConfig(
@@ -688,26 +684,39 @@ class SetProfitAnalyzer:
             logger.info(f"Detailed results saved to {json_file}")
 
 
-def parse_args():
+def parse_arguments() -> argparse.Namespace:
+    """Parse command-line arguments"""
     parser = argparse.ArgumentParser(description="Warframe Market Set Profit Analyzer")
-    parser.add_argument(
-        "--trend-days",
-        type=int,
-        default=0,
-        help="Analyze volume trends using the given number of days",
-    )
+    parser.add_argument("--platform", default=HEADERS.get("Platform", "pc"), help="Platform to query (pc, ps4, xbox, switch)")
+    parser.add_argument("--output-file", default=OUTPUT_FILE, help="Path to the output CSV file")
+    parser.add_argument("--profit-weight", type=float, default=PROFIT_WEIGHT, help="Weight for profit in score calculation")
+    parser.add_argument("--volume-weight", type=float, default=VOLUME_WEIGHT, help="Weight for 48h volume in score calculation")
+    parser.add_argument("--price-sample-size", type=int, default=PRICE_SAMPLE_SIZE, help="Number of orders used when averaging prices")
+    parser.add_argument("--debug", action="store_true", default=DEBUG_MODE, help="Enable debug logging")
     return parser.parse_args()
 
 
-async def main():
+async def main(args: argparse.Namespace) -> None:
     """Main entry point"""
-    args = parse_args()
-    analyzer = SetProfitAnalyzer(analyze_trends=args.trend_days > 0, trend_days=args.trend_days or 30)
+    global OUTPUT_FILE, PROFIT_WEIGHT, VOLUME_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE
+
+    # Apply command-line overrides
+    HEADERS["Platform"] = args.platform
+    OUTPUT_FILE = args.output_file
+    PROFIT_WEIGHT = args.profit_weight
+    VOLUME_WEIGHT = args.volume_weight
+    PRICE_SAMPLE_SIZE = args.price_sample_size
+    DEBUG_MODE = args.debug
+
+    if DEBUG_MODE:
+        logger.setLevel(logging.DEBUG)
+
+    analyzer = SetProfitAnalyzer()
 
     try:
         await analyzer.initialize()
         await analyzer.analyze_all_sets()
-        analyzer.save_results()
+        analyzer.save_to_csv()
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}", exc_info=True)
     finally:
@@ -716,11 +725,10 @@ async def main():
 
 if __name__ == "__main__":
     print("=== Warframe Market Set Profit Analyzer ===")
-    codex/implement-lightweight-cache-layer
-    print(f"Output will be saved to: {OUTPUT_FILE}")
+    args = parse_arguments()
+    print(f"Output will be saved to: {args.output_file}")
     print("Starting analysis...")
 
-    asyncio.run(main())
-
+    asyncio.run(main(args))
 
     print("Analysis complete!")

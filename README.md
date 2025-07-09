@@ -61,10 +61,13 @@ Run the analyzer:
 python wf_market_analyzer.py
 ```
 
-To analyze trading volume trends, provide the `--trend-days` option:
+You can override settings directly from the command line. For example, to use
+the Xbox market and change the scoring weights:
 
 ```
-python wf_market_analyzer.py --trend-days 30
+python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
+    --profit-weight 1.0 --volume-weight 1.5
+
 ```
 
 The script will:
