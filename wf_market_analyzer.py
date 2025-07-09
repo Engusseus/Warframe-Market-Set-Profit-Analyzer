@@ -2,7 +2,6 @@
 # Identifies profitable item sets based on a combined score of profit and trading volume
 
 
-import argparse
 import asyncio
 import aiohttp
 import pandas as pd
@@ -21,6 +20,7 @@ from config import (
     DEBUG_MODE,
     PROFIT_WEIGHT,
     VOLUME_WEIGHT,
+    PROFIT_MARGIN_WEIGHT,
     PRICE_SAMPLE_SIZE,
 )
 
@@ -55,6 +55,7 @@ class PriceData:
     part_prices: Dict[str, float]  # part_slug -> price
     total_part_cost: float
     profit: float
+    profit_margin: float  # profit divided by total_part_cost
 
 
 @dataclass
@@ -435,12 +436,14 @@ class SetProfitAnalyzer:
 
         # Calculate profit
         profit = set_price - total_part_cost
+        profit_margin = 0 if total_part_cost == 0 else profit / total_part_cost
 
         return PriceData(
             set_price=set_price,
             part_prices=part_prices,
             total_part_cost=total_part_cost,
-            profit=profit
+            profit=profit,
+            profit_margin=profit_margin
         )
 
     async def fetch_volume_data(self, set_slug: str) -> VolumeData:
@@ -525,9 +528,10 @@ class SetProfitAnalyzer:
         if not results:
             return results
 
-        # Extract profit and volume values
+        # Extract profit, volume and profit margin values
         profits = [r.price_data.profit for r in results]
         volumes = [r.volume_data.volume_48h for r in results]
+        margins = [r.price_data.profit_margin for r in results]
 
         # Calculate min/max for normalization
         min_profit = min(profits)
@@ -538,18 +542,27 @@ class SetProfitAnalyzer:
         max_volume = max(volumes)
         volume_range = max_volume - min_volume
 
+        min_margin = min(margins)
+        max_margin = max(margins)
+        margin_range = max_margin - min_margin
+
         # Normalize and calculate scores
         for result in results:
             # Avoid division by zero
             norm_profit = 0 if profit_range == 0 else (result.price_data.profit - min_profit) / profit_range
             norm_volume = 0 if volume_range == 0 else (result.volume_data.volume_48h - min_volume) / volume_range
+            norm_margin = 0 if margin_range == 0 else (result.price_data.profit_margin - min_margin) / margin_range
 
             # Calculate weighted score
-            result.score = (norm_profit * PROFIT_WEIGHT) + (norm_volume * VOLUME_WEIGHT)
+            result.score = (
+                norm_profit * PROFIT_WEIGHT
+                + norm_volume * VOLUME_WEIGHT
+                + norm_margin * PROFIT_MARGIN_WEIGHT
+            )
 
             if DEBUG_MODE:
                 logger.debug(f"Set: {result.set_data.name}, Profit: {result.price_data.profit}, "
-                             f"Volume: {result.volume_data.volume_48h}, Score: {result.score:.4f}")
+                             f"Volume: {result.volume_data.volume_48h}, Profit Margin: {result.price_data.profit_margin:.2f}, Score: {result.score:.4f}")
 
         return results
 
@@ -627,22 +640,23 @@ class SetProfitAnalyzer:
             row = {
                 'Set Name': result.set_data.name,
                 'Profit': round(result.price_data.profit, 1),
+                'Profit Margin': round(result.price_data.profit_margin, 2),
                 'Set Selling Price': round(result.price_data.set_price, 1),
                 'Part Costs Total': round(result.price_data.total_part_cost, 1),
                 'Volume (48h)': result.volume_data.volume_48h,
-                'Volume Trend': round(result.volume_data.trend, 4) if result.volume_data.trend is not None else None,
                 'Score': round(result.score, 4),
                 'Part Prices': part_prices_str
             }
             csv_data.append(row)
 
-        # Create DataFrame and save in chosen format
+        # Create DataFrame and save to CSV or Excel
         df = pd.DataFrame(csv_data)
-        if OUTPUT_FORMAT.lower() == 'xlsx':
-            df.to_excel(output_name, index=False)
+        if OUTPUT_FILE.lower().endswith('.xlsx'):
+            df.to_excel(OUTPUT_FILE, index=False)
         else:
-            df.to_csv(output_name, index=False)
-        logger.info(f"Results saved to {output_name}")
+            df.to_csv(OUTPUT_FILE, index=False)
+        logger.info(f"Results saved to {OUTPUT_FILE}")
+
 
         # Save detailed JSON for debugging
         if DEBUG_MODE:
@@ -668,7 +682,8 @@ class SetProfitAnalyzer:
                     'pricing': {
                         'set_price': result.price_data.set_price,
                         'total_part_cost': result.price_data.total_part_cost,
-                        'profit': result.price_data.profit
+                        'profit': result.price_data.profit,
+                        'profit_margin': result.price_data.profit_margin
                     },
                     'volume': {
                         'volume_48h': result.volume_data.volume_48h,

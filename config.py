@@ -21,6 +21,7 @@ DEBUG_MODE = True  # Enable detailed logging
 # Scoring Settings
 PROFIT_WEIGHT = 1.0
 VOLUME_WEIGHT = 1.2
+PROFIT_MARGIN_WEIGHT = 0.0  # Set >0 to factor profit margin into scores
 
 # Get average/median prices from this many orders
 PRICE_SAMPLE_SIZE = 2
