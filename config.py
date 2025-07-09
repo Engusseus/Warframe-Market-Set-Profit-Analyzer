@@ -25,5 +25,7 @@ VOLUME_WEIGHT = 1.2
 # Get average/median prices from this many orders
 PRICE_SAMPLE_SIZE = 2
 
-# Use median pricing instead of averaging when calculating prices
-USE_MEDIAN_PRICING = False
+codex/implement-lightweight-cache-layer
+# Directory where cached API responses are stored
+CACHE_DIR = 'data'
+

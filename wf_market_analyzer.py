@@ -8,6 +8,8 @@ import numpy as np
 import time
 import json
 import logging
+import os
+import argparse
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -22,7 +24,9 @@ from config import (
     PROFIT_WEIGHT,
     VOLUME_WEIGHT,
     PRICE_SAMPLE_SIZE,
-    USE_MEDIAN_PRICING,
+ codex/implement-lightweight-cache-layer
+    CACHE_DIR,
+
 )
 
 # Configure logging
@@ -61,6 +65,7 @@ class PriceData:
 class VolumeData:
     """Data structure to hold volume information"""
     volume_48h: int
+    trend: Optional[float] = None
 
 
 @dataclass
@@ -160,11 +165,18 @@ class WarframeMarketAPI:
 class SetProfitAnalyzer:
     """Main class for analyzing set profits"""
 
-    def __init__(self):
-        """Initialize the analyzer"""
+    def __init__(self, analyze_trends: bool = False, trend_days: int = 30):
+        """Initialize the analyzer
+
+        Args:
+            analyze_trends: Whether to calculate volume trends
+            trend_days: Number of days to use for trend calculations
+        """
         self.api = WarframeMarketAPI()
         self.sets = {}  # slug -> SetData
         self.results = []  # List of ResultData
+        self.analyze_trends = analyze_trends
+        self.trend_days = trend_days
 
     async def initialize(self):
         """Initialize the API client"""
@@ -173,6 +185,33 @@ class SetProfitAnalyzer:
     async def close(self):
         """Clean up resources"""
         await self.api.close()
+
+    def _get_cache_path(self, prefix: str, slug: str, date_str: Optional[str] = None) -> str:
+        """Return a cache file path for a given slug and date"""
+        if date_str is None:
+            date_str = time.strftime("%Y-%m-%d")
+        filename = f"{prefix}_{slug}_{date_str}.json"
+        return os.path.join(CACHE_DIR, filename)
+
+    def _load_cache(self, prefix: str, slug: str) -> Optional[dict]:
+        """Load cached data if available"""
+        path = self._get_cache_path(prefix, slug)
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load cache {path}: {e}")
+        return None
+
+    def _save_cache(self, prefix: str, slug: str, data: dict) -> None:
+        """Save data to cache"""
+        path = self._get_cache_path(prefix, slug)
+        try:
+            with open(path, 'w') as f:
+                json.dump(data, f)
+        except Exception as e:
+            logger.warning(f"Failed to save cache {path}: {e}")
 
     async def fetch_all_items(self) -> List[Dict]:
         """Fetch all tradable items from the API"""
@@ -251,6 +290,11 @@ class SetProfitAnalyzer:
             List of orders for the item
         """
         logger.info(f"Fetching orders for: {item_slug}")
+
+        cache = self._load_cache('orders', item_slug)
+        if cache is not None:
+            return cache
+
         data = await self.api.get(f"/v1/items/{item_slug}/orders")
 
         if not data or 'payload' not in data or 'orders' not in data['payload']:
@@ -267,6 +311,7 @@ class SetProfitAnalyzer:
         if DEBUG_MODE:
             logger.debug(f"Found {len(orders)} orders from online players for {item_slug}")
 
+        self._save_cache('orders', item_slug, orders)
         return orders
 
     def calculate_average_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
@@ -414,13 +459,16 @@ class SetProfitAnalyzer:
         """
         logger.info(f"Fetching volume data for set: {set_slug}")
 
+        cache = self._load_cache('volume', set_slug)
+        if cache is not None:
+            return VolumeData(volume_48h=cache.get('volume_48h', 0), trend=cache.get('trend'))
+
         # Use the statistics endpoint to get volume data
         data = await self.api.get(f"/v1/items/{set_slug}/statistics")
 
         volume_48h = 0
 
-        if data and 'payload' in data and 'statistics_closed' in data['payload'] and '48hours' in data['payload'][
-            'statistics_closed']:
+        if data and 'payload' in data and 'statistics_closed' in data['payload'] and '48hours' in data['payload']['statistics_closed']:
             # Extract volume from 48-hour statistics
             for stat in data['payload']['statistics_closed']['48hours']:
                 volume_48h += stat.get('volume', 0)
@@ -428,7 +476,43 @@ class SetProfitAnalyzer:
         if DEBUG_MODE:
             logger.debug(f"48-hour volume for {set_slug}: {volume_48h}")
 
+        self._save_cache('volume', set_slug, {'volume_48h': volume_48h})
+
         return VolumeData(volume_48h=volume_48h)
+
+    async def fetch_historical_statistics(self, set_slug: str, days: int = 30) -> Dict:
+        """Fetch and aggregate historical statistics for a set"""
+        logger.info(f"Fetching {days}-day statistics for set: {set_slug}")
+
+        cache = self._load_cache(f"history_{days}", set_slug)
+        if cache is not None:
+            return cache
+
+        data = await self.api.get(f"/v1/items/{set_slug}/statistics")
+
+        history = []
+        trend = None
+
+        if data and 'payload' in data and 'statistics_closed' in data['payload']:
+            stats = data['payload']['statistics_closed'].get('90days', [])
+            stats = stats[-days:]
+            volumes = []
+            for stat in stats:
+                volume = stat.get('volume', 0)
+                volumes.append(volume)
+                history.append({'datetime': stat.get('datetime'), 'volume': volume})
+
+            if volumes:
+                half = len(volumes) // 2
+                if half > 0:
+                    first = sum(volumes[:half]) / half
+                    second = sum(volumes[half:]) / (len(volumes) - half)
+                    if first > 0:
+                        trend = (second - first) / first
+
+        result = {'history': history, 'trend': trend}
+        self._save_cache(f"history_{days}", set_slug, result)
+        return result
 
     def normalize_data(self, results: List[ResultData]) -> List[ResultData]:
         """
@@ -490,6 +574,10 @@ class SetProfitAnalyzer:
         # Fetch volume data
         volume_data = await self.fetch_volume_data(set_slug)
 
+        if self.analyze_trends:
+            history = await self.fetch_historical_statistics(set_slug, self.trend_days)
+            volume_data.trend = history.get('trend')
+
         return ResultData(
             set_data=set_data,
             price_data=price_data,
@@ -546,6 +634,7 @@ class SetProfitAnalyzer:
                 'Set Selling Price': round(result.price_data.set_price, 1),
                 'Part Costs Total': round(result.price_data.total_part_cost, 1),
                 'Volume (48h)': result.volume_data.volume_48h,
+                'Volume Trend': round(result.volume_data.trend, 4) if result.volume_data.trend is not None else None,
                 'Score': round(result.score, 4),
                 'Part Prices': part_prices_str
             }
@@ -586,7 +675,8 @@ class SetProfitAnalyzer:
                         'profit': result.price_data.profit
                     },
                     'volume': {
-                        'volume_48h': result.volume_data.volume_48h
+                        'volume_48h': result.volume_data.volume_48h,
+                        'trend': result.volume_data.trend
                     },
                     'score': result.score
                 }
@@ -598,9 +688,21 @@ class SetProfitAnalyzer:
             logger.info(f"Detailed results saved to {json_file}")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Warframe Market Set Profit Analyzer")
+    parser.add_argument(
+        "--trend-days",
+        type=int,
+        default=0,
+        help="Analyze volume trends using the given number of days",
+    )
+    return parser.parse_args()
+
+
 async def main():
     """Main entry point"""
-    analyzer = SetProfitAnalyzer()
+    args = parse_args()
+    analyzer = SetProfitAnalyzer(analyze_trends=args.trend_days > 0, trend_days=args.trend_days or 30)
 
     try:
         await analyzer.initialize()
@@ -614,10 +716,11 @@ async def main():
 
 if __name__ == "__main__":
     print("=== Warframe Market Set Profit Analyzer ===")
-    output_name = OUTPUT_FILE if OUTPUT_FORMAT.lower() == 'csv' else OUTPUT_FILE.replace('.csv', '.xlsx')
-    print(f"Output will be saved to: {output_name}")
+    codex/implement-lightweight-cache-layer
+    print(f"Output will be saved to: {OUTPUT_FILE}")
     print("Starting analysis...")
 
     asyncio.run(main())
+
 
     print("Analysis complete!")
