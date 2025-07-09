@@ -72,6 +72,11 @@ python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
 
 ```
 
+Additional useful options:
+
+- `--use-median-pricing` to base prices on the median of sampled orders.
+- `--trend-days N` to calculate volume trends over the last `N` days.
+
 The script will:
 1. Fetch all tradable item sets
 2. Calculate profit margins for each set
