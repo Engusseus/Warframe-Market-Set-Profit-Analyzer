@@ -14,11 +14,18 @@ HEADERS = {
 
 # Output Settings
 OUTPUT_FILE = 'set_profit_analysis.csv'
+# Choose 'csv' or 'xlsx'
+OUTPUT_FORMAT = 'csv'
 DEBUG_MODE = True  # Enable detailed logging
 
 # Scoring Settings
 PROFIT_WEIGHT = 1.0
 VOLUME_WEIGHT = 1.2
 
-# Get average prices from this many orders
+# Get average/median prices from this many orders
 PRICE_SAMPLE_SIZE = 2
+
+codex/implement-lightweight-cache-layer
+# Directory where cached API responses are stored
+CACHE_DIR = 'data'
+
