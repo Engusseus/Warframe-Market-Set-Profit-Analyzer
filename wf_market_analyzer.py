@@ -776,6 +776,67 @@ class SetProfitAnalyzer:
         self.save_results()
 
 
+def run_analysis_ui(
+    platform='pc',
+    profit_weight=1.0,
+    volume_weight=1.2,
+    profit_margin_weight=0.0,
+    price_sample_size=2,
+    use_median_pricing=False,
+    analyze_trends=False,
+    trend_days=30,
+    debug=False,
+):
+    """
+    Run the analyzer and return a DataFrame and raw results for UI use.
+    Does not save files or plots.
+    """
+    import asyncio
+    global HEADERS, PROFIT_WEIGHT, VOLUME_WEIGHT, PROFIT_MARGIN_WEIGHT, PRICE_SAMPLE_SIZE, USE_MEDIAN_PRICING, DEBUG_MODE
+    HEADERS["Platform"] = platform
+    PROFIT_WEIGHT = profit_weight
+    VOLUME_WEIGHT = volume_weight
+    PROFIT_MARGIN_WEIGHT = profit_margin_weight
+    PRICE_SAMPLE_SIZE = price_sample_size
+    USE_MEDIAN_PRICING = use_median_pricing
+    DEBUG_MODE = debug
+
+    if DEBUG_MODE:
+        logger.setLevel(logging.DEBUG)
+
+    analyzer = SetProfitAnalyzer(
+        analyze_trends=analyze_trends,
+        trend_days=trend_days,
+    )
+
+    async def _run():
+        await analyzer.initialize()
+        await analyzer.analyze_all_sets()
+        await analyzer.close()
+        # Prepare DataFrame
+        csv_data = []
+        for result in analyzer.results:
+            part_prices_str = "; ".join([
+                f"{result.set_data.part_names.get(slug, slug)} (x{qty}): {result.price_data.part_prices.get(slug, 0):.1f}"
+                for slug, qty in result.set_data.parts.items()
+            ])
+            row = {
+                'Set Name': result.set_data.name,
+                'Profit': round(result.price_data.profit, 1),
+                'Profit Margin': round(result.price_data.profit_margin, 2),
+                'Set Selling Price': round(result.price_data.set_price, 1),
+                'Part Costs Total': round(result.price_data.total_part_cost, 1),
+                'Volume (48h)': result.volume_data.volume_48h,
+                'Score': round(result.score, 4),
+                'Part Prices': part_prices_str
+            }
+            csv_data.append(row)
+        df = pd.DataFrame(csv_data)
+        return df, analyzer.results
+
+    return asyncio.run(_run())
+
+
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments"""
     parser = argparse.ArgumentParser(description="Warframe Market Set Profit Analyzer")

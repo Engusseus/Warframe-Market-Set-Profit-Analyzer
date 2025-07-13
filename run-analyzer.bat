@@ -1,5 +1,5 @@
 @echo off
-REM Warframe Market Set Profit Analyzer Launcher
+REM Warframe Market Set Profit Analyzer Launcher (Streamlit UI version)
 
 REM Check if Python is installed
 python --version >nul 2>&1
@@ -20,10 +20,11 @@ if not exist %VENV%\Scripts\python.exe (
 REM Activate virtual environment
 call %VENV%\Scripts\activate.bat
 
-REM Install dependencies
+REM Install dependencies (including Streamlit and others)
 pip install -r requirements.txt
+pip install streamlit plotly scikit-learn streamlit-lottie
 
-REM Run the analyzer
-python wf_market_analyzer.py
+REM Run the Streamlit app
+streamlit run app.py
 
 pause
