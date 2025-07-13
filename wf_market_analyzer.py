@@ -5,23 +5,18 @@
 import asyncio
 import aiohttp
 import pandas as pd
-import time
-import json
-import logging
-import matplotlib.pyplot as plt
-import asyncio
-import aiohttp
-import pandas as pd
 import numpy as np
 import time
 import json
 import logging
 import os
 import glob
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+import argparse
 
 from config import (
     API_BASE_URL,
@@ -36,12 +31,16 @@ from config import (
     USE_MEDIAN_PRICING,
     CACHE_DIR,
     CACHE_TTL_DAYS,
+    OUTPUT_FORMAT,
 )
+
+# Ensure base URL includes API version
+API_BASE_URL = f"{API_BASE_URL.rstrip('/')}/v1"
 
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG if DEBUG_MODE else logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("wf_market_analyzer.log"),
@@ -218,7 +217,7 @@ class SetProfitAnalyzer:
         if not self.results:
             return
 
-        output_base = OUTPUT_FILE.rsplit('.', 1)[0]
+        output_base = os.path.splitext(OUTPUT_FILE)[0]
         plot_file = f"{output_base}_profit_vs_volume.png"
 
         profits = [r.price_data.profit for r in self.results]
@@ -284,13 +283,13 @@ class SetProfitAnalyzer:
     async def fetch_all_items(self) -> List[Dict]:
         """Fetch all tradable items from the API"""
         logger.info("Fetching all tradable items...")
-        data = await self.api.get("/v2/items")
+        data = await self.api.get("/items")
 
-        if not data or 'data' not in data:
+        if not data or 'payload' not in data:
             logger.error("Failed to fetch items")
             return []
 
-        return data['data']
+        return data['payload']['items']
 
     async def fetch_set_data(self, set_slug: str) -> Optional[SetData]:
         """
@@ -303,22 +302,22 @@ class SetProfitAnalyzer:
             SetData object or None if the set could not be fetched
         """
         logger.info(f"Fetching set data for: {set_slug}")
-        data = await self.api.get(f"/v2/item/{set_slug}/set")
+        data = await self.api.get(f"/items/{set_slug}")
 
-        if not data or 'data' not in data or 'items' not in data['data']:
+        if not data or 'payload' not in data or 'item' not in data['payload'] or 'items_in_set' not in data['payload']['item']:
             logger.error(f"Failed to fetch set data for {set_slug}")
             return None
 
         # Extract relevant info from the response
-        set_items = data['data']['items']
+        set_items = data['payload']['item']['items_in_set']
         set_name = None
         parts = {}
         part_names = {}
 
         # First, find the set itself to get the name
         for item in set_items:
-            if item['slug'] == set_slug and 'i18n' in item and 'en' in item['i18n']:
-                set_name = item['i18n']['en']['name']
+            if item['url_name'] == set_slug:
+                set_name = item.get('en', {}).get('item_name', set_slug)
                 break
 
         if not set_name:
@@ -328,17 +327,17 @@ class SetProfitAnalyzer:
         # Then process all parts
         for item in set_items:
             # Skip the set itself
-            if item['slug'] == set_slug:
+            if item['url_name'] == set_slug:
                 continue
 
             # Get part quantity
-            quantity = item.get('quantityInSet', 1)
+            quantity = item.get('quantity_for_set', 1)
 
             # Get part name
-            part_name = item.get('i18n', {}).get('en', {}).get('name', item['slug'])
+            part_name = item.get('en', {}).get('item_name', item['url_name'])
 
-            parts[item['slug']] = quantity
-            part_names[item['slug']] = part_name
+            parts[item['url_name']] = quantity
+            part_names[item['url_name']] = part_name
 
         return SetData(
             slug=set_slug,
@@ -639,7 +638,7 @@ class SetProfitAnalyzer:
 
     async def process_set(self, set_item: Dict) -> Optional[ResultData]:
         """Process a single set and return its analysis result"""
-        set_slug = set_item['slug']
+        set_slug = set_item['url_name']
 
         # Fetch set data (parts and quantities)
         set_data = await self.fetch_set_data(set_slug)
@@ -672,8 +671,8 @@ class SetProfitAnalyzer:
         # Fetch all items
         items = await self.fetch_all_items()
 
-        # Filter to only include sets
-        set_items = [item for item in items if 'set' in item.get('tags', [])]
+        # Filter to only include sets (url_name ends with '_set')
+        set_items = [item for item in items if item.get('url_name', '').endswith('_set')]
         logger.info(f"Found {len(set_items)} sets to analyze")
 
         tasks = [asyncio.create_task(self.process_set(item)) for item in set_items]
@@ -695,7 +694,9 @@ class SetProfitAnalyzer:
 
     def save_results(self):
         """Save results to CSV or XLSX file based on configuration"""
-        output_name = OUTPUT_FILE if OUTPUT_FORMAT.lower() == 'csv' else OUTPUT_FILE.replace('.csv', '.xlsx')
+        output_name = OUTPUT_FILE
+        if OUTPUT_FORMAT.lower() == 'xlsx':
+            output_name = os.path.splitext(OUTPUT_FILE)[0] + '.xlsx'
         logger.info(f"Saving results to {output_name}")
 
         # Prepare data for CSV
@@ -722,11 +723,11 @@ class SetProfitAnalyzer:
 
         # Create DataFrame and save to CSV or Excel
         df = pd.DataFrame(csv_data)
-        if OUTPUT_FILE.lower().endswith('.xlsx'):
-            df.to_excel(OUTPUT_FILE, index=False)
+        if output_name.lower().endswith('.xlsx'):
+            df.to_excel(output_name, index=False)
         else:
-            df.to_csv(OUTPUT_FILE, index=False)
-        logger.info(f"Results saved to {OUTPUT_FILE}")
+            df.to_csv(output_name, index=False)
+        logger.info(f"Results saved to {output_name}")
 
         # Generate profit vs. volume scatter plot
         self.generate_scatter_plot()

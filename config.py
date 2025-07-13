@@ -1,7 +1,7 @@
 """Configuration settings for Warframe Market Analyzer"""
 
 # API Settings
-API_BASE_URL = 'https://api.warframe.market'
+API_BASE_URL = 'https://api.warframe.market/v1'
 REQUESTS_PER_SECOND = 2  # Rate limit to avoid API throttling
 HEADERS = {
     'Platform': 'pc',
@@ -13,7 +13,7 @@ HEADERS = {
 # Output Settings
 OUTPUT_FILE = 'set_profit_analysis.csv'
 # Choose 'csv' or 'xlsx'
-OUTPUT_FORMAT = 'csv'
+OUTPUT_FORMAT = 'csv'  # 'csv' or 'xlsx'
 DEBUG_MODE = True  # Enable detailed logging
 
 # Scoring Settings
