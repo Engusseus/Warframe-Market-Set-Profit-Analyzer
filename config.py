@@ -1,13 +1,12 @@
 """Configuration settings for Warframe Market Analyzer"""
 
 # API Settings
-API_BASE_URL = 'https://api.warframe.market/v1'
+API_BASE_URL = 'https://api.warframe.market/v1'  # Base URL must include /v1
 REQUESTS_PER_SECOND = 2  # Rate limit to avoid API throttling
 HEADERS = {
     'Platform': 'pc',
     'Language': 'en',
-    'Accept': 'application/json',
-    'Crossplay': 'true'  # Enable crossplay to get all relevant orders
+    'Accept': 'application/json'  # 'Crossplay' header removed per v1 API
 }
 
 # Output Settings
