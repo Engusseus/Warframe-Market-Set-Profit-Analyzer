@@ -741,6 +741,10 @@ class SetProfitAnalyzer:
 
             logger.info(f"Detailed results saved to {json_file}")
 
+    def save_to_csv(self):
+        """Backward compatibility wrapper."""
+        self.save_results()
+
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments"""
@@ -750,13 +754,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--profit-weight", type=float, default=PROFIT_WEIGHT, help="Weight for profit in score calculation")
     parser.add_argument("--volume-weight", type=float, default=VOLUME_WEIGHT, help="Weight for 48h volume in score calculation")
     parser.add_argument("--price-sample-size", type=int, default=PRICE_SAMPLE_SIZE, help="Number of orders used when averaging prices")
+    parser.add_argument("--use-median-pricing", action="store_true", default=USE_MEDIAN_PRICING, help="Use median price calculations")
+    parser.add_argument("--trend-days", type=int, help="Calculate volume trend over the last N days")
     parser.add_argument("--debug", action="store_true", default=DEBUG_MODE, help="Enable debug logging")
     return parser.parse_args()
 
 
 async def main(args: argparse.Namespace) -> None:
     """Main entry point"""
-    global OUTPUT_FILE, PROFIT_WEIGHT, VOLUME_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE
+    global OUTPUT_FILE, PROFIT_WEIGHT, VOLUME_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE, USE_MEDIAN_PRICING
 
     # Apply command-line overrides
     HEADERS["Platform"] = args.platform
@@ -764,12 +770,16 @@ async def main(args: argparse.Namespace) -> None:
     PROFIT_WEIGHT = args.profit_weight
     VOLUME_WEIGHT = args.volume_weight
     PRICE_SAMPLE_SIZE = args.price_sample_size
+    USE_MEDIAN_PRICING = args.use_median_pricing
     DEBUG_MODE = args.debug
 
     if DEBUG_MODE:
         logger.setLevel(logging.DEBUG)
 
-    analyzer = SetProfitAnalyzer()
+    analyzer = SetProfitAnalyzer(
+        analyze_trends=args.trend_days is not None,
+        trend_days=args.trend_days or 30,
+    )
 
     try:
         await analyzer.initialize()
