@@ -1,7 +1,6 @@
 # Warframe Market Set Profit Analyzer
 # Identifies profitable item sets based on a combined score of profit and trading volume
 
-
 import asyncio
 import aiohttp
 import pandas as pd
@@ -11,19 +10,6 @@ import logging
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
-
-from config import (
-    API_BASE_URL,
-    REQUESTS_PER_SECOND,
-    HEADERS,
-    OUTPUT_FILE,
-    DEBUG_MODE,
-    PROFIT_WEIGHT,
-    VOLUME_WEIGHT,
-    PROFIT_MARGIN_WEIGHT,
-    PRICE_SAMPLE_SIZE,
-)
-
 
 # Configure logging
 logging.basicConfig(
@@ -36,7 +22,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration is now loaded from config.py
+# Configuration
+API_BASE_URL = 'https://api.warframe.market'
+REQUESTS_PER_SECOND = 3  # Rate limit to avoid API throttling
+HEADERS = {
+    'Platform': 'pc',
+    'Language': 'en',
+    'Accept': 'application/json',
+    'Crossplay': 'true'  # Enable crossplay to get all relevant orders
+}
+OUTPUT_FILE = 'set_profit_analysis.csv'
+DEBUG_MODE = True  # Enable detailed logging
+
+# Weight for scoring calculation
+PROFIT_WEIGHT = 1.0
+VOLUME_WEIGHT = 1.2
 
 
 @dataclass
@@ -55,14 +55,12 @@ class PriceData:
     part_prices: Dict[str, float]  # part_slug -> price
     total_part_cost: float
     profit: float
-    profit_margin: float  # profit divided by total_part_cost
 
 
 @dataclass
 class VolumeData:
     """Data structure to hold volume information"""
     volume_48h: int
-    trend: Optional[float] = None
 
 
 @dataclass
@@ -82,7 +80,6 @@ class WarframeMarketAPI:
         self.session = None
         self.last_request_time = 0
         self.request_interval = 1.0 / REQUESTS_PER_SECOND
-        self._lock = asyncio.Lock()
 
     async def initialize(self):
         """Create the HTTP session"""
@@ -95,12 +92,11 @@ class WarframeMarketAPI:
 
     async def _rate_limit(self):
         """Enforce rate limiting between requests"""
-        async with self._lock:
-            now = time.time()
-            elapsed = now - self.last_request_time
-            if elapsed < self.request_interval:
-                await asyncio.sleep(self.request_interval - elapsed)
-            self.last_request_time = time.time()
+        now = time.time()
+        elapsed = now - self.last_request_time
+        if elapsed < self.request_interval:
+            await asyncio.sleep(self.request_interval - elapsed)
+        self.last_request_time = time.time()
 
     async def get(self, endpoint: str, max_retries: int = 3) -> Optional[Dict]:
         """
@@ -162,18 +158,11 @@ class WarframeMarketAPI:
 class SetProfitAnalyzer:
     """Main class for analyzing set profits"""
 
-    def __init__(self, analyze_trends: bool = False, trend_days: int = 30):
-        """Initialize the analyzer
-
-        Args:
-            analyze_trends: Whether to calculate volume trends
-            trend_days: Number of days to use for trend calculations
-        """
+    def __init__(self):
+        """Initialize the analyzer"""
         self.api = WarframeMarketAPI()
         self.sets = {}  # slug -> SetData
         self.results = []  # List of ResultData
-        self.analyze_trends = analyze_trends
-        self.trend_days = trend_days
 
     async def initialize(self):
         """Initialize the API client"""
@@ -182,33 +171,6 @@ class SetProfitAnalyzer:
     async def close(self):
         """Clean up resources"""
         await self.api.close()
-
-    def _get_cache_path(self, prefix: str, slug: str, date_str: Optional[str] = None) -> str:
-        """Return a cache file path for a given slug and date"""
-        if date_str is None:
-            date_str = time.strftime("%Y-%m-%d")
-        filename = f"{prefix}_{slug}_{date_str}.json"
-        return os.path.join(CACHE_DIR, filename)
-
-    def _load_cache(self, prefix: str, slug: str) -> Optional[dict]:
-        """Load cached data if available"""
-        path = self._get_cache_path(prefix, slug)
-        if os.path.exists(path):
-            try:
-                with open(path, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.warning(f"Failed to load cache {path}: {e}")
-        return None
-
-    def _save_cache(self, prefix: str, slug: str, data: dict) -> None:
-        """Save data to cache"""
-        path = self._get_cache_path(prefix, slug)
-        try:
-            with open(path, 'w') as f:
-                json.dump(data, f)
-        except Exception as e:
-            logger.warning(f"Failed to save cache {path}: {e}")
 
     async def fetch_all_items(self) -> List[Dict]:
         """Fetch all tradable items from the API"""
@@ -287,11 +249,6 @@ class SetProfitAnalyzer:
             List of orders for the item
         """
         logger.info(f"Fetching orders for: {item_slug}")
-
-        cache = self._load_cache('orders', item_slug)
-        if cache is not None:
-            return cache
-
         data = await self.api.get(f"/v1/items/{item_slug}/orders")
 
         if not data or 'payload' not in data or 'orders' not in data['payload']:
@@ -308,10 +265,9 @@ class SetProfitAnalyzer:
         if DEBUG_MODE:
             logger.debug(f"Found {len(orders)} orders from online players for {item_slug}")
 
-        self._save_cache('orders', item_slug, orders)
         return orders
 
-    def calculate_average_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
+    def calculate_average_price(self, orders: List[Dict], order_type: str, count: int = 2) -> Optional[float]:
         """
         Calculate the average price from the lowest/highest N prices
 
@@ -348,31 +304,6 @@ class SetProfitAnalyzer:
 
         return sum(prices) / len(prices)
 
-    def calculate_median_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
-        """Calculate the median price from the lowest/highest N prices."""
-        filtered_orders = [o for o in orders if o['order_type'] == order_type]
-
-        if len(filtered_orders) < count:
-            logger.warning(
-                f"Not enough {order_type} orders (found {len(filtered_orders)}, need {count})"
-            )
-            if not filtered_orders:
-                return None
-            count = len(filtered_orders)
-
-        sorted_orders = sorted(
-            filtered_orders,
-            key=lambda o: o['platinum'],
-            reverse=(order_type == 'buy'),
-        )
-
-        prices = [o['platinum'] for o in sorted_orders[:count]]
-
-        if DEBUG_MODE:
-            logger.debug(f"Using {order_type} prices for median: {prices}")
-
-        return float(np.median(prices))
-
     async def calculate_set_profit(self, set_data: SetData) -> Optional[PriceData]:
         """
         Calculate profit for a set
@@ -391,11 +322,8 @@ class SetProfitAnalyzer:
             logger.error(f"No orders found for set {set_data.slug}")
             return None
 
-        # Calculate selling price for the set
-        if USE_MEDIAN_PRICING:
-            set_price = self.calculate_median_price(set_orders, 'sell')
-        else:
-            set_price = self.calculate_average_price(set_orders, 'sell')
+        # Calculate average selling price for the set (from lowest 2 sell orders)
+        set_price = self.calculate_average_price(set_orders, 'sell')
         if set_price is None:
             logger.error(f"Could not calculate sell price for set {set_data.slug}")
             return None
@@ -413,11 +341,8 @@ class SetProfitAnalyzer:
                 missing_parts.append(part_slug)
                 continue
 
-            # Calculate selling price for the part
-            if USE_MEDIAN_PRICING:
-                part_price = self.calculate_median_price(part_orders, 'sell')
-            else:
-                part_price = self.calculate_average_price(part_orders, 'sell')
+            # Calculate average selling price for the part (from lowest 2 sell orders)
+            part_price = self.calculate_average_price(part_orders, 'sell')
             if part_price is None:
                 logger.warning(f"Could not calculate price for part {part_slug}")
                 missing_parts.append(part_slug)
@@ -436,14 +361,12 @@ class SetProfitAnalyzer:
 
         # Calculate profit
         profit = set_price - total_part_cost
-        profit_margin = 0 if total_part_cost == 0 else profit / total_part_cost
 
         return PriceData(
             set_price=set_price,
             part_prices=part_prices,
             total_part_cost=total_part_cost,
-            profit=profit,
-            profit_margin=profit_margin
+            profit=profit
         )
 
     async def fetch_volume_data(self, set_slug: str) -> VolumeData:
@@ -458,16 +381,13 @@ class SetProfitAnalyzer:
         """
         logger.info(f"Fetching volume data for set: {set_slug}")
 
-        cache = self._load_cache('volume', set_slug)
-        if cache is not None:
-            return VolumeData(volume_48h=cache.get('volume_48h', 0), trend=cache.get('trend'))
-
         # Use the statistics endpoint to get volume data
         data = await self.api.get(f"/v1/items/{set_slug}/statistics")
 
         volume_48h = 0
 
-        if data and 'payload' in data and 'statistics_closed' in data['payload'] and '48hours' in data['payload']['statistics_closed']:
+        if data and 'payload' in data and 'statistics_closed' in data['payload'] and '48hours' in data['payload'][
+            'statistics_closed']:
             # Extract volume from 48-hour statistics
             for stat in data['payload']['statistics_closed']['48hours']:
                 volume_48h += stat.get('volume', 0)
@@ -475,43 +395,7 @@ class SetProfitAnalyzer:
         if DEBUG_MODE:
             logger.debug(f"48-hour volume for {set_slug}: {volume_48h}")
 
-        self._save_cache('volume', set_slug, {'volume_48h': volume_48h})
-
         return VolumeData(volume_48h=volume_48h)
-
-    async def fetch_historical_statistics(self, set_slug: str, days: int = 30) -> Dict:
-        """Fetch and aggregate historical statistics for a set"""
-        logger.info(f"Fetching {days}-day statistics for set: {set_slug}")
-
-        cache = self._load_cache(f"history_{days}", set_slug)
-        if cache is not None:
-            return cache
-
-        data = await self.api.get(f"/v1/items/{set_slug}/statistics")
-
-        history = []
-        trend = None
-
-        if data and 'payload' in data and 'statistics_closed' in data['payload']:
-            stats = data['payload']['statistics_closed'].get('90days', [])
-            stats = stats[-days:]
-            volumes = []
-            for stat in stats:
-                volume = stat.get('volume', 0)
-                volumes.append(volume)
-                history.append({'datetime': stat.get('datetime'), 'volume': volume})
-
-            if volumes:
-                half = len(volumes) // 2
-                if half > 0:
-                    first = sum(volumes[:half]) / half
-                    second = sum(volumes[half:]) / (len(volumes) - half)
-                    if first > 0:
-                        trend = (second - first) / first
-
-        result = {'history': history, 'trend': trend}
-        self._save_cache(f"history_{days}", set_slug, result)
-        return result
 
     def normalize_data(self, results: List[ResultData]) -> List[ResultData]:
         """
@@ -528,10 +412,9 @@ class SetProfitAnalyzer:
         if not results:
             return results
 
-        # Extract profit, volume and profit margin values
+        # Extract profit and volume values
         profits = [r.price_data.profit for r in results]
         volumes = [r.volume_data.volume_48h for r in results]
-        margins = [r.price_data.profit_margin for r in results]
 
         # Calculate min/max for normalization
         min_profit = min(profits)
@@ -542,57 +425,20 @@ class SetProfitAnalyzer:
         max_volume = max(volumes)
         volume_range = max_volume - min_volume
 
-        min_margin = min(margins)
-        max_margin = max(margins)
-        margin_range = max_margin - min_margin
-
         # Normalize and calculate scores
         for result in results:
             # Avoid division by zero
             norm_profit = 0 if profit_range == 0 else (result.price_data.profit - min_profit) / profit_range
             norm_volume = 0 if volume_range == 0 else (result.volume_data.volume_48h - min_volume) / volume_range
-            norm_margin = 0 if margin_range == 0 else (result.price_data.profit_margin - min_margin) / margin_range
 
             # Calculate weighted score
-            result.score = (
-                norm_profit * PROFIT_WEIGHT
-                + norm_volume * VOLUME_WEIGHT
-                + norm_margin * PROFIT_MARGIN_WEIGHT
-            )
+            result.score = (norm_profit * PROFIT_WEIGHT) + (norm_volume * VOLUME_WEIGHT)
 
             if DEBUG_MODE:
                 logger.debug(f"Set: {result.set_data.name}, Profit: {result.price_data.profit}, "
-                             f"Volume: {result.volume_data.volume_48h}, Profit Margin: {result.price_data.profit_margin:.2f}, Score: {result.score:.4f}")
+                             f"Volume: {result.volume_data.volume_48h}, Score: {result.score:.4f}")
 
         return results
-
-    async def process_set(self, set_item: Dict) -> Optional[ResultData]:
-        """Process a single set and return its analysis result"""
-        set_slug = set_item['slug']
-
-        # Fetch set data (parts and quantities)
-        set_data = await self.fetch_set_data(set_slug)
-        if not set_data:
-            return None
-
-        # Calculate profit
-        price_data = await self.calculate_set_profit(set_data)
-        if not price_data:
-            return None
-
-        # Fetch volume data
-        volume_data = await self.fetch_volume_data(set_slug)
-
-        if self.analyze_trends:
-            history = await self.fetch_historical_statistics(set_slug, self.trend_days)
-            volume_data.trend = history.get('trend')
-
-        return ResultData(
-            set_data=set_data,
-            price_data=price_data,
-            volume_data=volume_data,
-            score=0  # Will be calculated after normalization
-        )
 
     async def analyze_all_sets(self):
         """Main function to analyze all sets and calculate profits"""
@@ -605,13 +451,34 @@ class SetProfitAnalyzer:
         set_items = [item for item in items if 'set' in item.get('tags', [])]
         logger.info(f"Found {len(set_items)} sets to analyze")
 
-        tasks = [asyncio.create_task(self.process_set(item)) for item in set_items]
-
         results = []
-        for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Analyzing sets"):
-            result = await future
-            if result:
-                results.append(result)
+
+        # Process each set with a progress bar
+        for set_item in tqdm(set_items, desc="Analyzing sets"):
+            set_slug = set_item['slug']
+
+            # Fetch set data (parts and quantities)
+            set_data = await self.fetch_set_data(set_slug)
+            if not set_data:
+                continue
+
+            # Calculate profit
+            price_data = await self.calculate_set_profit(set_data)
+            if not price_data:
+                continue
+
+            # Fetch volume data
+            volume_data = await self.fetch_volume_data(set_slug)
+
+            # Store result
+            result = ResultData(
+                set_data=set_data,
+                price_data=price_data,
+                volume_data=volume_data,
+                score=0  # Will be calculated after normalization
+            )
+
+            results.append(result)
 
         # Normalize data and calculate scores
         results = self.normalize_data(results)
@@ -622,10 +489,9 @@ class SetProfitAnalyzer:
         self.results = results
         logger.info(f"Analysis complete. Found {len(results)} profitable sets.")
 
-    def save_results(self):
-        """Save results to CSV or XLSX file based on configuration"""
-        output_name = OUTPUT_FILE if OUTPUT_FORMAT.lower() == 'csv' else OUTPUT_FILE.replace('.csv', '.xlsx')
-        logger.info(f"Saving results to {output_name}")
+    def save_to_csv(self):
+        """Save results to CSV file"""
+        logger.info(f"Saving results to {OUTPUT_FILE}")
 
         # Prepare data for CSV
         csv_data = []
@@ -640,7 +506,6 @@ class SetProfitAnalyzer:
             row = {
                 'Set Name': result.set_data.name,
                 'Profit': round(result.price_data.profit, 1),
-                'Profit Margin': round(result.price_data.profit_margin, 2),
                 'Set Selling Price': round(result.price_data.set_price, 1),
                 'Part Costs Total': round(result.price_data.total_part_cost, 1),
                 'Volume (48h)': result.volume_data.volume_48h,
@@ -649,14 +514,10 @@ class SetProfitAnalyzer:
             }
             csv_data.append(row)
 
-        # Create DataFrame and save to CSV or Excel
+        # Create DataFrame and save to CSV
         df = pd.DataFrame(csv_data)
-        if OUTPUT_FILE.lower().endswith('.xlsx'):
-            df.to_excel(OUTPUT_FILE, index=False)
-        else:
-            df.to_csv(OUTPUT_FILE, index=False)
+        df.to_csv(OUTPUT_FILE, index=False)
         logger.info(f"Results saved to {OUTPUT_FILE}")
-
 
         # Save detailed JSON for debugging
         if DEBUG_MODE:
@@ -682,12 +543,10 @@ class SetProfitAnalyzer:
                     'pricing': {
                         'set_price': result.price_data.set_price,
                         'total_part_cost': result.price_data.total_part_cost,
-                        'profit': result.price_data.profit,
-                        'profit_margin': result.price_data.profit_margin
+                        'profit': result.price_data.profit
                     },
                     'volume': {
-                        'volume_48h': result.volume_data.volume_48h,
-                        'trend': result.volume_data.trend
+                        'volume_48h': result.volume_data.volume_48h
                     },
                     'score': result.score
                 }
@@ -699,33 +558,8 @@ class SetProfitAnalyzer:
             logger.info(f"Detailed results saved to {json_file}")
 
 
-def parse_arguments() -> argparse.Namespace:
-    """Parse command-line arguments"""
-    parser = argparse.ArgumentParser(description="Warframe Market Set Profit Analyzer")
-    parser.add_argument("--platform", default=HEADERS.get("Platform", "pc"), help="Platform to query (pc, ps4, xbox, switch)")
-    parser.add_argument("--output-file", default=OUTPUT_FILE, help="Path to the output CSV file")
-    parser.add_argument("--profit-weight", type=float, default=PROFIT_WEIGHT, help="Weight for profit in score calculation")
-    parser.add_argument("--volume-weight", type=float, default=VOLUME_WEIGHT, help="Weight for 48h volume in score calculation")
-    parser.add_argument("--price-sample-size", type=int, default=PRICE_SAMPLE_SIZE, help="Number of orders used when averaging prices")
-    parser.add_argument("--debug", action="store_true", default=DEBUG_MODE, help="Enable debug logging")
-    return parser.parse_args()
-
-
-async def main(args: argparse.Namespace) -> None:
+async def main():
     """Main entry point"""
-    global OUTPUT_FILE, PROFIT_WEIGHT, VOLUME_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE
-
-    # Apply command-line overrides
-    HEADERS["Platform"] = args.platform
-    OUTPUT_FILE = args.output_file
-    PROFIT_WEIGHT = args.profit_weight
-    VOLUME_WEIGHT = args.volume_weight
-    PRICE_SAMPLE_SIZE = args.price_sample_size
-    DEBUG_MODE = args.debug
-
-    if DEBUG_MODE:
-        logger.setLevel(logging.DEBUG)
-
     analyzer = SetProfitAnalyzer()
 
     try:
@@ -740,10 +574,9 @@ async def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     print("=== Warframe Market Set Profit Analyzer ===")
-    args = parse_arguments()
-    print(f"Output will be saved to: {args.output_file}")
+    print(f"Output will be saved to: {OUTPUT_FILE}")
     print("Starting analysis...")
 
-    asyncio.run(main(args))
+    asyncio.run(main())
 
     print("Analysis complete!")
