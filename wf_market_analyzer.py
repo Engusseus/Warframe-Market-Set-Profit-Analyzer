@@ -34,8 +34,6 @@ from config import (
     OUTPUT_FORMAT,
 )
 
-# Ensure base URL includes API version
-API_BASE_URL = f"{API_BASE_URL.rstrip('/')}/v1"
 
 
 # Configure logging
@@ -362,7 +360,7 @@ class SetProfitAnalyzer:
         if cache is not None:
             return cache
 
-        data = await self.api.get(f"/v1/items/{item_slug}/orders")
+        data = await self.api.get(f"/items/{item_slug}/orders")
 
         if not data or 'payload' not in data or 'orders' not in data['payload']:
             logger.error(f"Failed to fetch orders for {item_slug}")
@@ -533,7 +531,7 @@ class SetProfitAnalyzer:
             return VolumeData(volume_48h=cache.get('volume_48h', 0), trend=cache.get('trend'))
 
         # Use the statistics endpoint to get volume data
-        data = await self.api.get(f"/v1/items/{set_slug}/statistics")
+        data = await self.api.get(f"/items/{set_slug}/statistics")
 
         volume_48h = 0
 
@@ -557,7 +555,7 @@ class SetProfitAnalyzer:
         if cache is not None:
             return cache
 
-        data = await self.api.get(f"/v1/items/{set_slug}/statistics")
+        data = await self.api.get(f"/items/{set_slug}/statistics")
 
         history = []
         trend = None
@@ -783,8 +781,10 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Warframe Market Set Profit Analyzer")
     parser.add_argument("--platform", default=HEADERS.get("Platform", "pc"), help="Platform to query (pc, ps4, xbox, switch)")
     parser.add_argument("--output-file", default=OUTPUT_FILE, help="Path to the output CSV file")
+    parser.add_argument("--output-format", default=OUTPUT_FORMAT, choices=['csv', 'xlsx'], help="Output file format")
     parser.add_argument("--profit-weight", type=float, default=PROFIT_WEIGHT, help="Weight for profit in score calculation")
     parser.add_argument("--volume-weight", type=float, default=VOLUME_WEIGHT, help="Weight for 48h volume in score calculation")
+    parser.add_argument("--profit-margin-weight", type=float, default=PROFIT_MARGIN_WEIGHT, help="Weight for profit margin in score calculation")
     parser.add_argument("--price-sample-size", type=int, default=PRICE_SAMPLE_SIZE, help="Number of orders used when averaging prices")
     parser.add_argument("--use-median-pricing", action="store_true", default=USE_MEDIAN_PRICING, help="Use median price calculations")
     parser.add_argument("--trend-days", type=int, help="Calculate volume trend over the last N days")
@@ -794,13 +794,15 @@ def parse_arguments() -> argparse.Namespace:
 
 async def main(args: argparse.Namespace) -> None:
     """Main entry point"""
-    global OUTPUT_FILE, PROFIT_WEIGHT, VOLUME_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE, USE_MEDIAN_PRICING
+    global OUTPUT_FILE, OUTPUT_FORMAT, PROFIT_WEIGHT, VOLUME_WEIGHT, PROFIT_MARGIN_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE, USE_MEDIAN_PRICING
 
     # Apply command-line overrides
     HEADERS["Platform"] = args.platform
     OUTPUT_FILE = args.output_file
+    OUTPUT_FORMAT = args.output_format
     PROFIT_WEIGHT = args.profit_weight
     VOLUME_WEIGHT = args.volume_weight
+    PROFIT_MARGIN_WEIGHT = args.profit_margin_weight
     PRICE_SAMPLE_SIZE = args.price_sample_size
     USE_MEDIAN_PRICING = args.use_median_pricing
     DEBUG_MODE = args.debug
