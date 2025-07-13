@@ -2,6 +2,14 @@
 # Identifies profitable item sets based on a combined score of profit and trading volume
 
 
+
+import asyncio
+import aiohttp
+import pandas as pd
+import time
+import json
+import logging
+import matplotlib.pyplot as plt
 import asyncio
 import aiohttp
 import pandas as pd
@@ -205,6 +213,27 @@ class SetProfitAnalyzer:
         self.results = []  # List of ResultData
         self.analyze_trends = analyze_trends
         self.trend_days = trend_days
+
+    def generate_scatter_plot(self) -> None:
+        """Create a scatter plot of profit vs volume and save it as an image"""
+        if not self.results:
+            return
+
+        output_base = OUTPUT_FILE.rsplit('.', 1)[0]
+        plot_file = f"{output_base}_profit_vs_volume.png"
+
+        profits = [r.price_data.profit for r in self.results]
+        volumes = [r.volume_data.volume_48h for r in self.results]
+
+        plt.figure()
+        plt.scatter(volumes, profits)
+        plt.xlabel("Volume (48h)")
+        plt.ylabel("Profit")
+        plt.title("Profit vs. Volume")
+        plt.grid(True)
+        plt.savefig(plot_file)
+        plt.close()
+        logger.info(f"Scatter plot saved to {plot_file}")
 
     async def initialize(self):
         """Initialize the API client"""
@@ -700,6 +729,9 @@ class SetProfitAnalyzer:
             df.to_csv(OUTPUT_FILE, index=False)
         logger.info(f"Results saved to {OUTPUT_FILE}")
 
+        # Generate profit vs. volume scatter plot
+        self.generate_scatter_plot()
+
 
         # Save detailed JSON for debugging
         if DEBUG_MODE:
@@ -784,7 +816,7 @@ async def main(args: argparse.Namespace) -> None:
     try:
         await analyzer.initialize()
         await analyzer.analyze_all_sets()
-        analyzer.save_to_csv()
+        analyzer.save_results()
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}", exc_info=True)
     finally:
