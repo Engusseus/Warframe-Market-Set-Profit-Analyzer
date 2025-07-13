@@ -26,7 +26,7 @@ PRICE_SAMPLE_SIZE = 2
 # Use median pricing instead of averaging when calculating prices
 USE_MEDIAN_PRICING = False
 
-# Placeholder for future caching layer
+
 # Directory where cached API responses are stored
 CACHE_DIR = 'data'
 # Number of days to keep cached API responses

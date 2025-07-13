@@ -5,6 +5,13 @@
 import asyncio
 import aiohttp
 import pandas as pd
+import time
+import json
+import logging
+import matplotlib.pyplot as plt
+import asyncio
+import aiohttp
+import pandas as pd
 import numpy as np
 import time
 import json
@@ -205,6 +212,27 @@ class SetProfitAnalyzer:
         self.results = []  # List of ResultData
         self.analyze_trends = analyze_trends
         self.trend_days = trend_days
+
+    def generate_scatter_plot(self) -> None:
+        """Create a scatter plot of profit vs volume and save it as an image"""
+        if not self.results:
+            return
+
+        output_base = OUTPUT_FILE.rsplit('.', 1)[0]
+        plot_file = f"{output_base}_profit_vs_volume.png"
+
+        profits = [r.price_data.profit for r in self.results]
+        volumes = [r.volume_data.volume_48h for r in self.results]
+
+        plt.figure()
+        plt.scatter(volumes, profits)
+        plt.xlabel("Volume (48h)")
+        plt.ylabel("Profit")
+        plt.title("Profit vs. Volume")
+        plt.grid(True)
+        plt.savefig(plot_file)
+        plt.close()
+        logger.info(f"Scatter plot saved to {plot_file}")
 
     async def initialize(self):
         """Initialize the API client"""
@@ -700,6 +728,9 @@ class SetProfitAnalyzer:
             df.to_csv(OUTPUT_FILE, index=False)
         logger.info(f"Results saved to {OUTPUT_FILE}")
 
+        # Generate profit vs. volume scatter plot
+        self.generate_scatter_plot()
+
 
         # Save detailed JSON for debugging
         if DEBUG_MODE:
@@ -741,6 +772,10 @@ class SetProfitAnalyzer:
 
             logger.info(f"Detailed results saved to {json_file}")
 
+    def save_to_csv(self):
+        """Backward compatibility wrapper."""
+        self.save_results()
+
 
 def parse_arguments() -> argparse.Namespace:
     """Parse command-line arguments"""
@@ -750,13 +785,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--profit-weight", type=float, default=PROFIT_WEIGHT, help="Weight for profit in score calculation")
     parser.add_argument("--volume-weight", type=float, default=VOLUME_WEIGHT, help="Weight for 48h volume in score calculation")
     parser.add_argument("--price-sample-size", type=int, default=PRICE_SAMPLE_SIZE, help="Number of orders used when averaging prices")
+    parser.add_argument("--use-median-pricing", action="store_true", default=USE_MEDIAN_PRICING, help="Use median price calculations")
+    parser.add_argument("--trend-days", type=int, help="Calculate volume trend over the last N days")
     parser.add_argument("--debug", action="store_true", default=DEBUG_MODE, help="Enable debug logging")
     return parser.parse_args()
 
 
 async def main(args: argparse.Namespace) -> None:
     """Main entry point"""
-    global OUTPUT_FILE, PROFIT_WEIGHT, VOLUME_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE
+    global OUTPUT_FILE, PROFIT_WEIGHT, VOLUME_WEIGHT, PRICE_SAMPLE_SIZE, DEBUG_MODE, USE_MEDIAN_PRICING
 
     # Apply command-line overrides
     HEADERS["Platform"] = args.platform
@@ -764,17 +801,21 @@ async def main(args: argparse.Namespace) -> None:
     PROFIT_WEIGHT = args.profit_weight
     VOLUME_WEIGHT = args.volume_weight
     PRICE_SAMPLE_SIZE = args.price_sample_size
+    USE_MEDIAN_PRICING = args.use_median_pricing
     DEBUG_MODE = args.debug
 
     if DEBUG_MODE:
         logger.setLevel(logging.DEBUG)
 
-    analyzer = SetProfitAnalyzer()
+    analyzer = SetProfitAnalyzer(
+        analyze_trends=args.trend_days is not None,
+        trend_days=args.trend_days or 30,
+    )
 
     try:
         await analyzer.initialize()
         await analyzer.analyze_all_sets()
-        analyzer.save_to_csv()
+        analyzer.save_results()
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}", exc_info=True)
     finally:
