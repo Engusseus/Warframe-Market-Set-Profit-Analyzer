@@ -1,29 +1,43 @@
 @echo off
-REM Warframe Market Set Profit Analyzer Launcher
+echo ===================================
+echo Warframe Market Set Profit Analyzer
+echo ===================================
+echo.
 
 REM Check if Python is installed
-python --version >nul 2>&1
-if %ERRORLEVEL% neq 0 (
-    echo Python is not installed. Please install Python 3.7 or higher and try again.
+python --version > nul 2>&1
+if %errorlevel% neq 0 (
+    echo Python is not installed or not in PATH.
+    echo Please install Python from https://www.python.org/downloads/
+    echo Make sure to check "Add Python to PATH" during installation.
+    echo.
     pause
     exit /b 1
 )
 
-set VENV=venv
-
-REM Create virtual environment if it doesn't exist
-if not exist %VENV%\Scripts\python.exe (
-    echo Creating virtual environment...
-    python -m venv %VENV%
+REM Check if virtual environment exists, create if it doesn't
+if not exist venv (
+    echo Setting up virtual environment...
+    python -m venv venv
+    echo Virtual environment created.
 )
 
-REM Activate virtual environment
-call %VENV%\Scripts\activate.bat
+REM Activate virtual environment and install dependencies
+echo Activating virtual environment...
+call venv\Scripts\activate.bat
 
-REM Install dependencies
-pip install -r requirements.txt
+echo Installing required packages...
+pip install -r requirements.txt > nul 2>&1
 
-REM Run the analyzer
+echo.
+echo Running Warframe Market Analyzer...
+echo Results will be saved to set_profit_analysis.csv
+echo.
 python wf_market_analyzer.py
 
+echo.
+echo Analysis complete! 
+echo.
+echo Results saved to: %CD%\set_profit_analysis.csv
+echo.
 pause
