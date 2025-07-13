@@ -55,7 +55,7 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
 
 ### Option 1: One-click Launch (Windows)
 
-1. [Download or clone this repository](https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer)
+1. [Download or clone this repository]([https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer](https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/tree/dev))
 2. Double-click `run-analyzer.bat` in the project root
 3. The script will automatically:
    - Check if Python is installed
