@@ -1,6 +1,4 @@
-"""
-Configuration settings for Warframe Market Analyzer
-"""
+"""Configuration settings for Warframe Market Analyzer"""
 
 # API Settings
 API_BASE_URL = 'https://api.warframe.market'
@@ -25,8 +23,12 @@ PROFIT_MARGIN_WEIGHT = 0.0  # Set >0 to factor profit margin into scores
 
 # Get average/median prices from this many orders
 PRICE_SAMPLE_SIZE = 2
+# Use median pricing instead of averaging when calculating prices
+USE_MEDIAN_PRICING = False
 
 # Placeholder for future caching layer
 # Directory where cached API responses are stored
 CACHE_DIR = 'data'
+# Number of days to keep cached API responses
+CACHE_TTL_DAYS = 7
 

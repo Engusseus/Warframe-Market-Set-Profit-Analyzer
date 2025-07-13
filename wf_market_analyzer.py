@@ -5,10 +5,13 @@
 import asyncio
 import aiohttp
 import pandas as pd
+import numpy as np
 import time
 import json
 import logging
-import argparse
+import os
+import glob
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -23,6 +26,9 @@ from config import (
     VOLUME_WEIGHT,
     PROFIT_MARGIN_WEIGHT,
     PRICE_SAMPLE_SIZE,
+    USE_MEDIAN_PRICING,
+    CACHE_DIR,
+    CACHE_TTL_DAYS,
 )
 
 
@@ -38,6 +44,29 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration is now loaded from config.py
+
+
+def purge_old_cache_files() -> None:
+    """Delete cache files older than the configured TTL."""
+    if not os.path.isdir(CACHE_DIR):
+        return
+    now = datetime.now()
+    for fname in os.listdir(CACHE_DIR):
+        if not fname.endswith(".json"):
+            continue
+        parts = fname.rsplit('_', 1)
+        if len(parts) < 2:
+            continue
+        date_str = os.path.splitext(parts[1])[0]
+        try:
+            file_date = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            continue
+        if (now - file_date).days > CACHE_TTL_DAYS:
+            try:
+                os.remove(os.path.join(CACHE_DIR, fname))
+            except Exception as e:
+                logger.warning(f"Failed to remove expired cache {fname}: {e}")
 
 
 @dataclass
@@ -170,6 +199,7 @@ class SetProfitAnalyzer:
             analyze_trends: Whether to calculate volume trends
             trend_days: Number of days to use for trend calculations
         """
+        purge_old_cache_files()
         self.api = WarframeMarketAPI()
         self.sets = {}  # slug -> SetData
         self.results = []  # List of ResultData
@@ -192,14 +222,26 @@ class SetProfitAnalyzer:
         return os.path.join(CACHE_DIR, filename)
 
     def _load_cache(self, prefix: str, slug: str) -> Optional[dict]:
-        """Load cached data if available"""
-        path = self._get_cache_path(prefix, slug)
-        if os.path.exists(path):
+        """Load cached data if available and not expired"""
+        pattern = os.path.join(CACHE_DIR, f"{prefix}_{slug}_*.json")
+        newest = None
+        newest_date = None
+        for path in glob.glob(pattern):
+            date_part = os.path.splitext(path)[0].split('_')[-1]
             try:
-                with open(path, 'r') as f:
+                file_date = datetime.strptime(date_part, "%Y-%m-%d")
+            except ValueError:
+                continue
+            if (datetime.now() - file_date).days <= CACHE_TTL_DAYS:
+                if newest_date is None or file_date > newest_date:
+                    newest = path
+                    newest_date = file_date
+        if newest:
+            try:
+                with open(newest, 'r') as f:
                     return json.load(f)
             except Exception as e:
-                logger.warning(f"Failed to load cache {path}: {e}")
+                logger.warning(f"Failed to load cache {newest}: {e}")
         return None
 
     def _save_cache(self, prefix: str, slug: str, data: dict) -> None:

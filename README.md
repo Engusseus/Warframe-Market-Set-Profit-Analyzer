@@ -94,6 +94,9 @@ Adjust the values in `config.py` to customize how the analyzer behaves:
 - `DEBUG_MODE`: Enable or disable detailed logging
 - `PRICE_SAMPLE_SIZE`: Number of orders to sample when calculating prices
 - `USE_MEDIAN_PRICING`: Use the median price of the sampled orders instead of the average
+- `CACHE_DIR`: Directory where cached API responses are stored
+- `CACHE_TTL_DAYS`: Number of days to keep cache files before they expire. Older files are ignored when loading cached data.
+  Use the `purge_old_cache_files()` helper in `wf_market_analyzer.py` to remove them manually.
 
 ## How Scoring Works
 
