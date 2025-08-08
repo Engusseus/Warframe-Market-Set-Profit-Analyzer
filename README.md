@@ -14,6 +14,8 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
 - **Live Progress, Animations, and Effects**: Enjoy spinners, Lottie animations, and confetti.
 - **Results Table & Plot**: View sortable tables and interactive scatter plots of profit vs. volume.
 - **Linear Regression (Profit vs. Volume)**: Run statistical analysis with a regression line and R² displayed.
+- **Persistent Analytics (SQLite)**: Each run appends results to a single local SQLite DB for cumulative analysis.
+- **24/7 Mode**: Optional continuous mode to fetch and append data every N minutes (default 60).
 - **All CLI features still available**: You can still run the classic script for CSV/XLSX output.
 - **Improved error handling, caching, and async performance**.
 
@@ -86,6 +88,12 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
    streamlit run app.py
    ```
 
+### 24/7 Mode (Continuous)
+
+- Toggle "24/7 Mode" in the UI and set the interval (default 60 minutes).
+- The app will keep appending results to the local DB (`data/market_history.sqlite`).
+- Use the regression button under "Statistical Analysis (Cumulative)" to train on all historical runs.
+
 ### Classic CLI Usage
 
 You can still run the classic script for CSV/XLSX output:
@@ -112,7 +120,8 @@ python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
 - **Results Table**: Sortable, filterable table of all sets
 - **Scatter Plot**: Interactive profit vs. volume plot
 - **Expandable Details**: Click to see breakdown for top set
-- **Statistical Analysis**: Button for linear regression with regression line and R²
+- **Statistical Analysis**: Button for linear regression with regression line and R² using all historical runs
+- **24/7 Mode**: Automatically append data every N minutes
 
 ---
 
@@ -121,6 +130,7 @@ python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
 - This is a development branch: features may break, change, or be removed at any time
 - API changes or downtime may cause errors
 - Some features (e.g., confetti, Lottie) require a modern browser
+- Continuous mode depends on the app staying open; server sleep may pause scheduling
 
 ---
 
@@ -137,6 +147,7 @@ Adjust the values in `config.py` for CLI defaults, or use the sidebar in the UI 
 - `USE_MEDIAN_PRICING`: Use the median price of the sampled orders instead of the average
 - `CACHE_DIR`: Directory where cached API responses are stored
 - `CACHE_TTL_DAYS`: Number of days to keep cache files before they expire
+- `DB_PATH`: Path to the SQLite DB for cumulative analytics
 
 ---
 

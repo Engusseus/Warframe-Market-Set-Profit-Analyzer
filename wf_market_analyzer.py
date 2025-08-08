@@ -32,6 +32,7 @@ from config import (
     CACHE_DIR,
     CACHE_TTL_DAYS,
     OUTPUT_FORMAT,
+    DB_PATH,
 )
 
 
@@ -703,84 +704,64 @@ class SetProfitAnalyzer:
 
     def save_results(self):
         """Save results to CSV or XLSX file based on configuration"""
-        output_name = OUTPUT_FILE
-        if OUTPUT_FORMAT.lower() == 'xlsx':
-            output_name = os.path.splitext(OUTPUT_FILE)[0] + '.xlsx'
-        logger.info(f"Saving results to {output_name}")
+        # Persist results to SQLite for cumulative analytics instead of CSV/JSON outputs
+        try:
+            import sqlite3
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            # Main table for per-run results
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS set_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_ts TEXT NOT NULL,
+                    platform TEXT,
+                    set_slug TEXT,
+                    set_name TEXT,
+                    profit REAL,
+                    profit_margin REAL,
+                    set_price REAL,
+                    part_cost_total REAL,
+                    volume_48h INTEGER,
+                    score REAL
+                )
+                """
+            )
 
-        # Prepare data for CSV
-        csv_data = []
-
-        for result in self.results:
-            # Build a string with all part prices
-            part_prices_str = "; ".join([
-                f"{result.set_data.part_names.get(slug, slug)} (x{qty}): {result.price_data.part_prices.get(slug, 0):.1f}"
-                for slug, qty in result.set_data.parts.items()
-            ])
-
-            row = {
-                'Set Name': result.set_data.name,
-                'Profit': round(result.price_data.profit, 1),
-                'Profit Margin': round(result.price_data.profit_margin, 2),
-                'Set Selling Price': round(result.price_data.set_price, 1),
-                'Part Costs Total': round(result.price_data.total_part_cost, 1),
-                'Volume (48h)': result.volume_data.volume_48h,
-                'Score': round(result.score, 4),
-                'Part Prices': part_prices_str
-            }
-            csv_data.append(row)
-
-        # Create DataFrame and save to CSV or Excel
-        df = pd.DataFrame(csv_data)
-        if output_name.lower().endswith('.xlsx'):
-            df.to_excel(output_name, index=False)
-        else:
-            df.to_csv(output_name, index=False)
-        logger.info(f"Results saved to {output_name}")
-
-        # Generate profit vs. volume scatter plot
-        self.generate_scatter_plot()
-
-
-        # Save detailed JSON for debugging
-        if DEBUG_MODE:
-            json_file = 'set_profit_analysis_detailed.json'
-
-            # Convert dataclasses to dictionaries
-            detailed_data = []
-
+            run_ts = datetime.utcnow().isoformat()
+            platform = HEADERS.get("Platform", "pc")
+            rows = []
             for result in self.results:
-                detailed_result = {
-                    'set': {
-                        'slug': result.set_data.slug,
-                        'name': result.set_data.name,
-                        'parts': {
-                            slug: {
-                                'quantity': qty,
-                                'name': result.set_data.part_names.get(slug, slug),
-                                'price': result.price_data.part_prices.get(slug, 0)
-                            }
-                            for slug, qty in result.set_data.parts.items()
-                        }
-                    },
-                    'pricing': {
-                        'set_price': result.price_data.set_price,
-                        'total_part_cost': result.price_data.total_part_cost,
-                        'profit': result.price_data.profit,
-                        'profit_margin': result.price_data.profit_margin
-                    },
-                    'volume': {
-                        'volume_48h': result.volume_data.volume_48h,
-                        'trend': result.volume_data.trend
-                    },
-                    'score': result.score
-                }
-                detailed_data.append(detailed_result)
+                rows.append(
+                    (
+                        run_ts,
+                        platform,
+                        result.set_data.slug,
+                        result.set_data.name,
+                        float(round(result.price_data.profit, 6)),
+                        float(round(result.price_data.profit_margin, 6)),
+                        float(round(result.price_data.set_price, 6)),
+                        float(round(result.price_data.total_part_cost, 6)),
+                        int(result.volume_data.volume_48h),
+                        float(round(result.score, 6)),
+                    )
+                )
 
-            with open(json_file, 'w') as f:
-                json.dump(detailed_data, f, indent=2)
-
-            logger.info(f"Detailed results saved to {json_file}")
+            cur.executemany(
+                """
+                INSERT INTO set_results (
+                    run_ts, platform, set_slug, set_name, profit, profit_margin,
+                    set_price, part_cost_total, volume_48h, score
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Persisted {len(rows)} rows to {DB_PATH}")
+        except Exception as e:
+            logger.error(f"Failed to persist results to SQLite: {e}")
 
     def save_to_csv(self):
         """Backward compatibility wrapper."""

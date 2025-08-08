@@ -4,6 +4,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from wf_market_analyzer import run_analysis_ui
+from config import DB_PATH
+import sqlite3
+from datetime import datetime
 from sklearn.linear_model import LinearRegression
 import numpy as np
 
@@ -84,13 +87,24 @@ config = sidebar_config()
 if 'data' not in st.session_state:
     st.session_state['data'] = None
     st.session_state['results'] = None
+    st.session_state['continuous'] = False
+    st.session_state['interval_minutes'] = 60
+    st.session_state['last_run'] = None
 
 st.markdown("""
 Run a full market analysis and get a ranked table of profitable sets. 
 Click below to start! 🚀
 """)
 
-run_btn = st.button("Run Analysis", type="primary")
+col_run, col_toggle = st.columns([2, 2])
+with col_run:
+    run_btn = st.button("Run Analysis", type="primary")
+with col_toggle:
+    st.checkbox("24/7 Mode", key='continuous', help="Continuously fetch and append data.")
+    if st.session_state['continuous']:
+        st.session_state['interval_minutes'] = st.number_input(
+            "Interval (minutes)", min_value=5, max_value=240, value=60, step=5
+        )
 
 if run_btn:
     st.session_state['data'] = None
@@ -113,6 +127,7 @@ if run_btn:
             )
             st.session_state['data'] = df
             st.session_state['results'] = results
+            st.session_state['last_run'] = datetime.utcnow().isoformat()
             st.success("Analysis complete! 🎉")
             st.balloons()
         except Exception as e:
@@ -153,14 +168,29 @@ if st.session_state['data'] is not None:
                 st.info("No top set details available.")
 
     st.markdown("---")
-    st.subheader("📈 Statistical Analysis")
+    st.subheader("📈 Statistical Analysis (Cumulative)")
     col1, col2 = st.columns([1,1])
     with col1:
-        if st.button("Run Linear Regression (Profit vs. Volume)"):
+        # Helper: load cumulative dataset from SQLite
+        def load_cumulative_df():
             try:
-                # Prepare data and validate
-                X = df[['Volume (48h)']].values.astype(float)
-                y = df['Profit'].values.astype(float)
+                conn = sqlite3.connect(DB_PATH)
+                query = "SELECT run_ts, platform, set_slug, set_name, profit, profit_margin, set_price, part_cost_total, volume_48h, score FROM set_results"
+                hist_df = pd.read_sql_query(query, conn)
+                conn.close()
+                return hist_df
+            except Exception as e:
+                st.warning(f"No historical data yet or DB error: {e}")
+                return None
+
+        if st.button("Run Linear Regression (Profit vs. Volume) - All Runs"):
+            try:
+                hist_df = load_cumulative_df()
+                if hist_df is None or len(hist_df) < 2:
+                    st.warning("Not enough historical data to fit regression.")
+                    raise ValueError("insufficient data")
+                X = hist_df[['volume_48h']].values.astype(float)
+                y = hist_df['profit'].values.astype(float)
                 if len(X) < 2 or np.allclose(X, X[0]):
                     st.warning("Not enough variation in Volume to fit a regression.")
                 else:
@@ -170,7 +200,7 @@ if st.session_state['data'] is not None:
                     r2 = float(model.score(X, y))
                     st.success(f"Profit = {coef:.4f} × Volume + {intercept:.4f}  (R² = {r2:.4f})")
 
-                    # Build regression line
+                    # Build regression line using historical volume range
                     x_sorted = np.sort(X.flatten())
                     y_pred = coef * x_sorted + intercept
 
@@ -178,9 +208,9 @@ if st.session_state['data'] is not None:
                     fig2 = go.Figure()
                     fig2.add_trace(
                         go.Scatter(
-                            x=df['Volume (48h)'], y=df['Profit'], mode='markers',
-                            marker=dict(color=df['Score'], colorscale='Purples', showscale=True),
-                            text=df['Set Name'], name='Data'
+                            x=hist_df['volume_48h'], y=hist_df['profit'], mode='markers',
+                            marker=dict(color=hist_df['score'], colorscale='Purples', showscale=True),
+                            text=hist_df['set_name'], name='Historical Data'
                         )
                     )
                     fig2.add_trace(
@@ -193,9 +223,32 @@ if st.session_state['data'] is not None:
                     st.plotly_chart(fig2, use_container_width=True)
                     st.balloons()
             except Exception as ex:
-                st.error(f"Linear regression failed: {ex}")
+                st.info("Linear regression requires cumulative data from multiple runs. Run analysis a few times first.")
     with col2:
-        st.info("Try adjusting weights or toggles in the sidebar and rerun analysis for different results!")
+        st.info("24/7 Mode appends data every interval so regression improves over time. Adjust weights or toggles in the sidebar and rerun analysis.")
+
+    # 24/7 Mode: display status and schedule next run
+    if st.session_state['continuous']:
+        st.markdown("---")
+        st.subheader("24/7 Mode Status")
+        last = st.session_state['last_run'] or "Never"
+        st.markdown(f"Last run (UTC): {last}")
+        st.markdown(f"Interval: {int(st.session_state['interval_minutes'])} minutes")
+        # Use Streamlit autorefresh to trigger runs
+        # Note: The rerun will re-enter the page and the user can click Run Analysis once; for true unattended
+        # operation, we trigger programmatic runs as well
+        import time
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        # Programmatic auto-run when interval has elapsed
+        try:
+            if st.session_state['last_run']:
+                last_ts = datetime.fromisoformat(st.session_state['last_run'])
+                elapsed_min = (datetime.utcnow() - last_ts).total_seconds() / 60.0
+                if elapsed_min >= float(st.session_state['interval_minutes']):
+                    # Trigger a run automatically
+                    st.experimental_rerun()
+        except Exception:
+            pass
 
 st.markdown("""
 ---

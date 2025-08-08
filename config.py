@@ -31,3 +31,6 @@ CACHE_DIR = 'data'
 # Number of days to keep cached API responses
 CACHE_TTL_DAYS = 7
 
+
+# Persistent storage (single-file SQLite database)
+DB_PATH = 'data/market_history.sqlite'
