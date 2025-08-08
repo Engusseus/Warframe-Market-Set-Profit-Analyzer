@@ -2,13 +2,12 @@
 
 # API Settings
 API_BASE_URL = 'https://api.warframe.market/v1'  # Base URL must include /v1
-RPS_LIMIT = 3.0  # Requests per second limit (Warframe.market ToS)
-MAX_CONCURRENCY = 6  # Max concurrent HTTP requests
+REQUESTS_PER_SECOND = 3  # Average budget; burst handled by token-bucket
 USER_AGENT = 'WarframeSetAnalyzer/1.0 (+https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer)'
 HEADERS = {
     'Platform': 'pc',
     'Language': 'en',
-    'Accept': 'application/json',
+    'Accept': 'application/json',  # 'Crossplay' header removed per v1 API
     'User-Agent': USER_AGENT,
 }
 
@@ -32,12 +31,14 @@ USE_MEDIAN_PRICING = False  # Deprecated in UI
 USE_STATISTICS_FOR_PRICING = True
 
 # Concurrency
-CONCURRENCY_LIMIT = MAX_CONCURRENCY
+CONCURRENCY_LIMIT = 10  # Max concurrent HTTP requests
+
 
 # Directory where cached API responses are stored
 CACHE_DIR = 'data'
 # Number of days to keep cached API responses
 CACHE_TTL_DAYS = 7
+
 
 # Persistent storage (single-file SQLite database)
 DB_PATH = 'data/market_history.sqlite'

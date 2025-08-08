@@ -20,8 +20,7 @@ import argparse
 
 from config import (
     API_BASE_URL,
-    RPS_LIMIT,
-    MAX_CONCURRENCY,
+    REQUESTS_PER_SECOND,
     HEADERS,
     OUTPUT_FILE,
     DEBUG_MODE,
@@ -35,6 +34,7 @@ from config import (
     CACHE_TTL_DAYS,
     OUTPUT_FORMAT,
     DB_PATH,
+    CONCURRENCY_LIMIT,
 )
 
 
@@ -114,21 +114,25 @@ class ResultData:
 
 
 class WarframeMarketAPI:
-    """Client for interacting with the Warframe Market API with proper rate limiting and concurrency control"""
+    """Client for interacting with the Warframe Market API"""
 
     def __init__(self, cancel_token: Optional[dict] = None):
-        """Initialize the API client with rate limiting and concurrency control"""
+        """Initialize the API client with concurrency and rate limiting"""
         self.session = None
-        self._semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
+        self.last_request_time = 0
+        self.request_interval = 1.0 / REQUESTS_PER_SECOND
+        self._lock = asyncio.Lock()
+        # Token bucket state
+        self._semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
         self._rate_lock = asyncio.Lock()
         self._request_timestamps: List[float] = []
-        self._rps_budget = RPS_LIMIT
+        self._rps_budget = max(1, REQUESTS_PER_SECOND)
         self._stats = {"total_requests": 0, "errors": 0, "429": 0, "started": time.time()}
         self.cancel_token = cancel_token or {"stop": False}
 
     async def initialize(self):
-        """Create the HTTP session with proper connector settings"""
-        connector = aiohttp.TCPConnector(limit=MAX_CONCURRENCY, ttl_dns_cache=300)
+        """Create the HTTP session"""
+        connector = aiohttp.TCPConnector(limit=CONCURRENCY_LIMIT, ttl_dns_cache=300)
         self.session = aiohttp.ClientSession(headers=HEADERS, connector=connector)
 
     async def close(self):
@@ -151,29 +155,20 @@ class WarframeMarketAPI:
 
     async def get(self, endpoint: str, max_retries: int = 3) -> Optional[Dict]:
         """
-        Make a GET request to the API with rate limiting, concurrency control, and retry logic
-
-        Args:
-            endpoint: API endpoint (without base URL)
-            max_retries: Maximum number of retry attempts
-
-        Returns:
-            Response data or None if the request failed
+        Make a GET request to the API with rate limiting and retry logic.
+        Returns parsed JSON on 200, None otherwise.
         """
         retries = 0
-        backoff = 1  # Initial backoff in seconds
-
+        backoff = 1.0
         while retries <= max_retries:
-            # Fast-cancel check
+            # Cooperative cancel
             if self.cancel_token.get("stop"):
                 raise asyncio.CancelledError()
-            
+            await self._rate_limit()
             url = f"{API_BASE_URL}{endpoint}"
-
             try:
                 if DEBUG_MODE:
-                    logger.debug(f"Making request to: {url}")
-
+                    logger.debug(f"GET {url}")
                 async with self._semaphore:
                     await self._rate_limit()
                     async with self.session.get(url) as response:
@@ -183,40 +178,30 @@ class WarframeMarketAPI:
                             return data
                         else:
                             error_text = await response.text()
-                            logger.error(f"Error {response.status} from {url}: {error_text}")
+                            logger.error(f"HTTP {response.status} for {url}: {error_text}")
                             self._stats["errors"] += 1
-
-                            # Handle specific error codes
-                            if response.status == 429:  # Rate limited
-                                wait_time = backoff * 3  # Longer backoff for rate limiting
-                                logger.warning(f"Rate limited! Waiting {wait_time} seconds")
+                            if response.status == 429:
                                 self._stats["429"] += 1
+                                wait_time = backoff * 3.0
+                                logger.warning(f"Rate limited; sleeping {wait_time:.1f}s")
                                 await asyncio.sleep(wait_time)
-                                backoff *= 2  # Exponential backoff
-                            elif response.status >= 500:  # Server error
+                                backoff = min(backoff * 2.0, 30.0)
+                            elif response.status >= 500:
                                 wait_time = backoff
-                                logger.warning(f"Server error! Retrying in {wait_time} seconds")
+                                logger.warning(f"Server error {response.status}; retry in {wait_time:.1f}s")
                                 await asyncio.sleep(wait_time)
-                                backoff *= 2  # Exponential backoff
-                            else:  # Client error
-                                logger.error(f"Client error: {response.status} - {error_text}")
-                                return None  # Don't retry client errors
-
-                            retries += 1
-
+                                backoff = min(backoff * 2.0, 30.0)
+                            else:
+                                return None
+            except asyncio.CancelledError:
+                raise
             except Exception as e:
-                logger.error(f"Exception while requesting {url}: {str(e)}")
+                logger.exception(f"Request error for {url}: {e}")
                 await asyncio.sleep(backoff)
-                backoff *= 2  # Exponential backoff
-                retries += 1
-
+                backoff = min(backoff * 2.0, 30.0)
+            retries += 1
         logger.error(f"Max retries ({max_retries}) exceeded for {endpoint}")
         return None
-
-
-class SetProfitAnalyzer:
-    """Main class for analyzing set profits with robust pricing and scoring"""
-
     def __init__(
         self,
         analyze_trends: bool = False,
@@ -398,7 +383,6 @@ class SetProfitAnalyzer:
 
     @staticmethod
     def _quantile(values: List[float], q: float) -> Optional[float]:
-        """Compute quantile with proper error handling"""
         if not values:
             return None
         try:
@@ -406,14 +390,74 @@ class SetProfitAnalyzer:
         except Exception:
             return None
 
+    def calculate_average_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
+        """
+        Calculate the average price from the lowest/highest N prices
+
+        Args:
+            orders: List of orders
+            order_type: 'sell' or 'buy'
+            count: Number of orders to average
+
+        Returns:
+            Average price or None if not enough orders
+        """
+        filtered_orders = [o for o in orders if o['order_type'] == order_type]
+
+        if len(filtered_orders) < count:
+            logger.warning(f"Not enough {order_type} orders (found {len(filtered_orders)}, need {count})")
+            if not filtered_orders:
+                return None
+            count = len(filtered_orders)  # Adjust count if we have fewer orders
+
+        # For sell orders, we want the lowest prices (ascending)
+        # For buy orders, we want the highest prices (descending)
+        sorted_orders = sorted(
+            filtered_orders,
+            key=lambda o: o['platinum'],
+            reverse=(order_type == 'buy')
+        )
+
+        # Take the average of the top N prices
+        prices = [o['platinum'] for o in sorted_orders[:count]]
+
+        # Log the prices we're using
+        if DEBUG_MODE:
+            logger.debug(f"Using {order_type} prices: {prices}")
+
+        return sum(prices) / len(prices)
+
+    def calculate_median_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
+        """Calculate the median price from the lowest/highest N prices."""
+        filtered_orders = [o for o in orders if o['order_type'] == order_type]
+
+        if len(filtered_orders) < count:
+            logger.warning(
+                f"Not enough {order_type} orders (found {len(filtered_orders)}, need {count})"
+            )
+            if not filtered_orders:
+                return None
+            count = len(filtered_orders)
+
+        sorted_orders = sorted(
+            filtered_orders,
+            key=lambda o: o['platinum'],
+            reverse=(order_type == 'buy'),
+        )
+
+        prices = [o['platinum'] for o in sorted_orders[:count]]
+
+        if DEBUG_MODE:
+            logger.debug(f"Using {order_type} prices for median: {prices}")
+
+        return float(np.median(prices))
+
     async def calculate_set_profit(self, set_data: SetData, conservative_pricing: bool = False, min_samples_quantile: int = 8) -> Optional[PriceData]:
         """
-        Calculate profit for a set with robust pricing options
+        Calculate profit for a set
 
         Args:
             set_data: SetData object with set and part information
-            conservative_pricing: If True, use P25 for sell price and P75 for buy prices
-            min_samples_quantile: Minimum samples required for quantile-based pricing
 
         Returns:
             PriceData object or None if prices could not be calculated
@@ -582,21 +626,16 @@ class SetProfitAnalyzer:
         return result
 
     def normalize_data(self, results: List[ResultData], robust: bool = False) -> List[ResultData]:
+        """Normalize features and compute composite score.
+    
+        - Filters invalid or non-positive rows first.
+        - Two modes:
+          * robust=True: rank-based normalization with tie-aware average ranks.
+          * robust=False: min-max normalization.
         """
-        Normalize profit and volume data to a 0-1 scale with robust options
-
-        Args:
-            results: List of ResultData objects
-            robust: If True, use rank-based normalization instead of min-max
-
-        Returns:
-            Updated ResultData objects with normalized scores
-        """
-        logger.info("Normalizing data and calculating scores...")
-
         if not results:
             return results
-
+    
         # Filter invalid rows first (prevent skew and NaN issues)
         filtered: List[ResultData] = []
         for r in results:
@@ -608,30 +647,44 @@ class SetProfitAnalyzer:
                 filtered.append(r)
             except Exception:
                 continue
-
+    
         if not filtered:
-            return []
-
-        profits = [r.price_data.profit for r in filtered]
-        volumes = [r.volume_data.volume_48h for r in filtered]
-        margins = [r.price_data.profit_margin for r in filtered]
-
+            return filtered
+    
+        profits = np.array([r.price_data.profit for r in filtered], dtype=float)
+        volumes = np.array([r.volume_data.volume_48h for r in filtered], dtype=float)
+        margins = np.array([r.price_data.profit_margin for r in filtered], dtype=float)
+    
+        N = len(filtered)
+    
         if robust:
-            # Rank-based normalization (descending)
-            N = len(filtered)
-            sp = sorted(profits)
-            sv = sorted(volumes)
-            sm = sorted(margins)
-            r_profit = {v: i for i, v in enumerate(sp)}
-            r_volume = {v: i for i, v in enumerate(sv)}
-            r_margin = {v: i for i, v in enumerate(sm)}
+            # Tie-aware average ranks on ascending arrays (lower value -> lower rank)
+            def avg_ranks(arr: np.ndarray) -> dict:
+                order = np.argsort(arr)
+                sorted_vals = arr[order]
+                ranks = {}
+                i = 0
+                n = len(sorted_vals)
+                while i < n:
+                    j = i + 1
+                    while j < n and sorted_vals[j] == sorted_vals[i]:
+                        j += 1
+                    avg = (i + (j - 1)) / 2.0
+                    ranks[sorted_vals[i]] = avg
+                    i = j
+                return ranks
+    
+            r_profit = avg_ranks(profits)
+            r_volume = avg_ranks(volumes)
+            r_margin = avg_ranks(margins)
+    
             for r in filtered:
                 rp = r_profit[r.price_data.profit]
                 rv = r_volume[r.volume_data.volume_48h]
                 rm = r_margin[r.price_data.profit_margin]
-                norm_profit = (N - 1 - rp) / (N - 1) if N > 1 else 0
-                norm_volume = (N - 1 - rv) / (N - 1) if N > 1 else 0
-                norm_margin = (N - 1 - rm) / (N - 1) if N > 1 else 0
+                norm_profit = (N - 1 - rp) / (N - 1) if N > 1 else 0.0
+                norm_volume = (N - 1 - rv) / (N - 1) if N > 1 else 0.0
+                norm_margin = (N - 1 - rm) / (N - 1) if N > 1 else 0.0
                 r.score = (
                     norm_profit * PROFIT_WEIGHT
                     + norm_volume * VOLUME_WEIGHT
@@ -639,28 +692,23 @@ class SetProfitAnalyzer:
                 )
         else:
             # Min-max normalization
-            min_profit, max_profit = min(profits), max(profits)
-            min_volume, max_volume = min(volumes), max(volumes)
-            min_margin, max_margin = min(margins), max(margins)
-            profit_range = max_profit - min_profit
-            volume_range = max_volume - min_volume
-            margin_range = max_margin - min_margin
+            p_min, p_max = float(np.min(profits)), float(np.max(profits))
+            v_min, v_max = float(np.min(volumes)), float(np.max(volumes))
+            m_min, m_max = float(np.min(margins)), float(np.max(margins))
+            p_rng = max(p_max - p_min, 1e-9)
+            v_rng = max(v_max - v_min, 1e-9)
+            m_rng = max(m_max - m_min, 1e-9)
             for r in filtered:
-                norm_profit = 0 if profit_range == 0 else (r.price_data.profit - min_profit) / profit_range
-                norm_volume = 0 if volume_range == 0 else (r.volume_data.volume_48h - min_volume) / volume_range
-                norm_margin = 0 if margin_range == 0 else (r.price_data.profit_margin - min_margin) / margin_range
+                norm_profit = (r.price_data.profit - p_min) / p_rng
+                norm_volume = (r.volume_data.volume_48h - v_min) / v_rng
+                norm_margin = (r.price_data.profit_margin - m_min) / m_rng
                 r.score = (
                     norm_profit * PROFIT_WEIGHT
                     + norm_volume * VOLUME_WEIGHT
                     + norm_margin * PROFIT_MARGIN_WEIGHT
                 )
-
-        if DEBUG_MODE:
-            for r in filtered:
-                logger.debug(
-                    f"Set: {r.set_data.name}, Profit: {r.price_data.profit}, Volume: {r.volume_data.volume_48h}, Profit Margin: {r.price_data.profit_margin:.2f}, Score: {r.score:.4f}"
-                )
-
+    
+        # Replace original list in-place order preserved
         return filtered
 
     async def process_set(self, set_item: Dict, conservative_pricing: bool = False, min_samples_quantile: int = 8) -> Optional[ResultData]:
@@ -718,7 +766,6 @@ class SetProfitAnalyzer:
     ):
         """Main function to analyze all sets and calculate profits"""
         logger.info("Starting set profit analysis...")
-        start_time = time.time()
 
         # Fetch all items
         items = await self.fetch_all_items()
@@ -772,14 +819,13 @@ class SetProfitAnalyzer:
         results.sort(key=lambda r: r.score, reverse=True)
 
         self.results = results
-        elapsed = time.time() - start_time
-        # Log basic run stats
-        logger.info(
-            f"Analysis complete. Found {len(results)} sets. Failures: {self._failures}. Runtime: {elapsed:.1f}s"
-        )
+        logger.info(f"Analysis complete. Found {len(results)} sets. Failures: {self._failures}")
 
     def save_results(self, platform: Optional[str] = None, config_json: Optional[str] = None):
-        """Persist results to SQLite using normalized schema with proper PRAGMAs."""
+        """Persist results to SQLite.
+        - If platform/config_json provided: use normalized schema (runs, set_metrics) with WAL.
+        - Else: legacy schema (set_results, volume_snapshots) for CLI compatibility.
+        """
         try:
             import sqlite3
             os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -791,36 +837,33 @@ class SetProfitAnalyzer:
             cur.execute("PRAGMA foreign_keys=ON;")
 
             if platform is not None and config_json is not None:
-                # New normalized schema
+                # New schema
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS runs (
                         run_id INTEGER PRIMARY KEY AUTOINCREMENT,
                         ts_utc TEXT NOT NULL,
-                        platform TEXT NOT NULL,
-                        config_json TEXT NOT NULL
+                        platform TEXT,
+                        config_json TEXT
                     )
                     """
                 )
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS set_metrics (
-                        run_id INTEGER NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-                        set_slug TEXT NOT NULL,
-                        set_name TEXT NOT NULL,
-                        price_sell REAL,
-                        price_cost REAL,
+                        run_id INTEGER NOT NULL,
+                        set_slug TEXT,
+                        set_name TEXT,
                         profit REAL,
-                        margin REAL,
-                        volume_48h REAL,
+                        profit_margin REAL,
+                        set_price REAL,
+                        part_cost_total REAL,
+                        volume_48h INTEGER,
                         eta_hours REAL,
                         profit_per_day REAL,
                         score REAL,
-                        trend_pct REAL,
-                        conservative_pricing INTEGER NOT NULL,
-                        robust_score INTEGER NOT NULL,
-                        trade_tax_percent REAL NOT NULL,
-                        UNIQUE(run_id, set_slug)
+                        PRIMARY KEY (run_id, set_slug),
+                        FOREIGN KEY (run_id) REFERENCES runs(run_id)
                     )
                     """
                 )
@@ -832,40 +875,32 @@ class SetProfitAnalyzer:
                 ts = datetime.utcnow().isoformat()
                 cur.execute("INSERT INTO runs (ts_utc, platform, config_json) VALUES (?, ?, ?)", (ts, platform, config_json))
                 run_id = cur.lastrowid
-
                 rows = []
                 for r in self.results:
                     lambda_per_hour = max(0.0, float(r.volume_data.volume_48h) / 48.0)
                     eta_hours = float('inf') if lambda_per_hour <= 0 else max(0.5, 1.0 / lambda_per_hour)
                     profit_per_day = float(r.price_data.profit) * (24.0 / (eta_hours if np.isfinite(eta_hours) else 24.0))
-                    trend_pct = r.volume_data.price_trend_pct if r.volume_data.price_trend_pct is not None else None
-                    
                     rows.append(
                         (
                             run_id,
                             r.set_data.slug,
                             r.set_data.name,
-                            float(round(r.price_data.set_price, 6)),
-                            float(round(r.price_data.total_part_cost, 6)),
                             float(round(r.price_data.profit, 6)),
                             float(round(r.price_data.profit_margin, 6)),
+                            float(round(r.price_data.set_price, 6)),
+                            float(round(r.price_data.total_part_cost, 6)),
                             int(r.volume_data.volume_48h),
                             float(round(eta_hours if np.isfinite(eta_hours) else 999999.0, 6)),
                             float(round(profit_per_day, 6)),
                             float(round(r.score, 6)),
-                            float(round(trend_pct, 6)) if trend_pct is not None else None,
-                            1 if hasattr(self, '_conservative_pricing') and self._conservative_pricing else 0,
-                            1 if hasattr(self, '_robust_score') and self._robust_score else 0,
-                            float(getattr(self, '_trade_tax_percent', 0.0)),
                         )
                     )
                 cur.executemany(
                     """
                     INSERT OR REPLACE INTO set_metrics (
-                        run_id, set_slug, set_name, price_sell, price_cost, profit, margin,
-                        volume_48h, eta_hours, profit_per_day, score, trend_pct,
-                        conservative_pricing, robust_score, trade_tax_percent
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        run_id, set_slug, set_name, profit, profit_margin, set_price, part_cost_total,
+                        volume_48h, eta_hours, profit_per_day, score
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     rows,
                 )
@@ -874,7 +909,7 @@ class SetProfitAnalyzer:
                 logger.info(f"Persisted run {run_id} with {len(rows)} rows to {DB_PATH}")
                 return
 
-            # Legacy schema path (for CLI compatibility)
+            # Legacy schema path
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS set_results (
@@ -991,11 +1026,6 @@ def run_analysis_ui(
         cancel_token=cancel_token or {"stop": False},
         on_progress=progress_callback,
     )
-    
-    # Store settings for persistence
-    analyzer._conservative_pricing = conservative_pricing
-    analyzer._robust_score = robust_score
-    analyzer._trade_tax_percent = trade_tax_percent
 
     async def _run():
         await analyzer.initialize()
@@ -1022,14 +1052,11 @@ def run_analysis_ui(
                     "analyze_trends": analyze_trends,
                     "trend_days": trend_days,
                     "trade_tax_percent": trade_tax_percent,
-                    "min_profit_threshold": min_profit_threshold,
-                    "min_margin_threshold": min_margin_threshold,
-                    "min_volume_threshold": min_volume_threshold,
                 }
                 analyzer.save_results(platform=platform, config_json=json.dumps(cfg))
         finally:
             await analyzer.close()
-        # Prepare DataFrame with required columns
+        # Prepare DataFrame
         csv_data = []
         for result in analyzer.results:
             # Apply trade tax and compute ETA/profit per day
@@ -1042,15 +1069,15 @@ def run_analysis_ui(
                 for slug, qty in result.set_data.parts.items()
             ])
             row = {
-                'Set Name': result.set_data.name,
                 'Set Slug': result.set_data.slug,
-                'Price (sell)': round(result.price_data.set_price, 1),
-                'Price (cost)': round(result.price_data.total_part_cost, 1),
+                'Set Name': result.set_data.name,
                 'Profit': round(net_profit, 1),
-                'Margin': round(result.price_data.profit_margin, 2),
+                'Profit Margin': round(result.price_data.profit_margin, 2),
+                'Set Selling Price': round(result.price_data.set_price, 1),
+                'Part Costs Total': round(result.price_data.total_part_cost, 1),
                 'Volume (48h)': result.volume_data.volume_48h,
-                'ETA (h)': None if not np.isfinite(eta_hours) else round(eta_hours, 2),
-                'Profit/day': round(profit_per_day, 1),
+                'ETA (hours)': None if not np.isfinite(eta_hours) else round(eta_hours, 2),
+                'Profit/Day': round(profit_per_day, 1),
                 'Score': round(result.score, 4),
                 'Part Prices': part_prices_str,
                 'Market': f"https://warframe.market/items/{result.set_data.slug}",
@@ -1121,68 +1148,18 @@ async def main(args: argparse.Namespace) -> None:
         await analyzer.close()
 
 
-def cli_entry():
-    """CLI entry point for the analyzer"""
-    import argparse
-    import asyncio
-    import sys
-    
-    # Global declarations must come before any usage
-    global HEADERS, PROFIT_WEIGHT, VOLUME_WEIGHT, PROFIT_MARGIN_WEIGHT, DEBUG_MODE
-    
-    parser = argparse.ArgumentParser(description="Warframe Market Set Profit Analyzer")
-    parser.add_argument("--platform", default="pc", choices=["pc", "xbox", "ps4", "switch"], 
-                       help="Platform to analyze")
-    parser.add_argument("--output-file", default=OUTPUT_FILE, 
-                       help="Output file name")
-    parser.add_argument("--profit-weight", type=float, default=PROFIT_WEIGHT,
-                       help="Weight for profit in scoring")
-    parser.add_argument("--volume-weight", type=float, default=VOLUME_WEIGHT,
-                       help="Weight for volume in scoring")
-    parser.add_argument("--profit-margin-weight", type=float, default=PROFIT_MARGIN_WEIGHT,
-                       help="Weight for profit margin in scoring")
-    parser.add_argument("--conservative-pricing", action="store_true",
-                       help="Use conservative pricing (P25 sell, P75 buy)")
-    parser.add_argument("--robust-score", action="store_true",
-                       help="Use robust (rank-based) scoring")
-    parser.add_argument("--debug", action="store_true",
-                       help="Enable debug logging")
-    
-    args = parser.parse_args()
-    
-    # Update global config
-    HEADERS["Platform"] = args.platform
-    PROFIT_WEIGHT = args.profit_weight
-    VOLUME_WEIGHT = args.volume_weight
-    PROFIT_MARGIN_WEIGHT = args.profit_margin_weight
-    DEBUG_MODE = args.debug
-    
-    if DEBUG_MODE:
-        logger.setLevel(logging.DEBUG)
-    
-    async def main():
-        analyzer = SetProfitAnalyzer()
-        await analyzer.initialize()
-        try:
-            await analyzer.analyze_all_sets(
-                conservative_pricing=args.conservative_pricing,
-                robust_score=args.robust_score,
-            )
-            analyzer.save_results()
-            analyzer.generate_scatter_plot()
-            print(f"Analysis complete! Results saved to {OUTPUT_FILE}")
-        finally:
-            await analyzer.close()
-    
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nAnalysis cancelled by user.")
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error: {e}")
-        sys.exit(1)
+def cli_entry() -> None:
+    """Console script entry point."""
+    args = parse_arguments()
+    asyncio.run(main(args))
 
 
 if __name__ == "__main__":
-    cli_entry()
+    print("=== Warframe Market Set Profit Analyzer ===")
+    args = parse_arguments()
+    print(f"Output will be saved to: {args.output_file}")
+    print("Starting analysis...")
+
+    asyncio.run(main(args))
+
+    print("Analysis complete!")

@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 from wf_market_analyzer import run_analysis_ui
 from config import DB_PATH
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime
 from sklearn.linear_model import LinearRegression
 import numpy as np
 
@@ -56,41 +56,6 @@ st.markdown('''
 st.title("💠 Warframe Market Profit Analyzer")
 st.markdown("<h4>Analyze sets and uncover profits interactively!</h4>", unsafe_allow_html=True)
 
-# Initialize session state
-if 'data' not in st.session_state:
-    st.session_state['data'] = None
-    st.session_state['results'] = None
-    st.session_state['continuous'] = False
-    st.session_state['interval_minutes'] = 60
-    st.session_state['last_run_iso'] = None
-    st.session_state['autorun_pending'] = False
-    st.session_state['run_in_progress'] = False
-    st.session_state.setdefault('cancel_token', {'stop': False})
-
-# 24/7 autorun check at top of script
-if st.session_state.get('continuous'):
-    last_run = st.session_state.get('last_run_iso')
-    if last_run:
-        try:
-            last_ts = datetime.fromisoformat(last_run)
-            elapsed_min = (datetime.utcnow() - last_ts).total_seconds() / 60.0
-            if elapsed_min >= float(st.session_state.get('interval_minutes', 60)):
-                st.session_state['autorun_pending'] = True
-        except Exception:
-            pass
-    else:
-        # First run in continuous mode
-        st.session_state['autorun_pending'] = True
-
-# Reset stuck in-progress after timeout (10 minutes)
-if st.session_state.get('run_in_progress') and st.session_state.get('last_run_iso'):
-    try:
-        last_ts = datetime.fromisoformat(st.session_state['last_run_iso'])
-        if (datetime.utcnow() - last_ts).total_seconds() > 600:
-            st.session_state['run_in_progress'] = False
-    except Exception:
-        st.session_state['run_in_progress'] = False
-
 # Sidebar config
 @st.cache_data(show_spinner=False)
 def _static_constants():
@@ -111,6 +76,7 @@ def sidebar_config():
     min_profit = st.sidebar.number_input("Min profit", value=0.0, step=1.0)
     min_margin = st.sidebar.number_input("Min margin", value=0.0, step=0.01)
     min_volume = st.sidebar.number_input("Min 48h volume", value=1.0, step=1.0)
+    # Removed median pricing and statistics toggle – statistics is always used
     analyze_trends = st.sidebar.checkbox("Analyze trends", False)
     trend_days = st.sidebar.slider("Trend days", 7, 60, 30, 1)
     trade_tax_percent = st.sidebar.number_input("Trade tax %", value=0.0, min_value=0.0, max_value=50.0, step=0.5)
@@ -140,6 +106,16 @@ def sidebar_config():
 config = sidebar_config()
 
 # Main UI
+if 'data' not in st.session_state:
+    st.session_state['data'] = None
+    st.session_state['results'] = None
+    st.session_state['continuous'] = False
+    st.session_state['interval_minutes'] = 60
+    st.session_state['last_run'] = None
+    st.session_state['autorun_pending'] = False
+    st.session_state['run_in_progress'] = False
+    st.session_state['cancel_token'] = {'stop': False}
+
 st.markdown("""
 Run a full market analysis and get a ranked table of profitable sets. 
 Click below to start! 🚀
@@ -159,22 +135,46 @@ with col_toggle:
 
 if stop_btn:
     # Signal stop by setting a flag in session
+    if 'cancel_token' not in st.session_state:
+        st.session_state['cancel_token'] = {'stop': False}
     st.session_state['cancel_token']['stop'] = True
     st.info("Stopping after current in-flight tasks...")
 
 if quit_btn:
+    st.session_state['cancel_token']['stop'] = True
     st.success("Quitting...")
+    # Streamlit 1.32+: use st.query_params to avoid deprecation warning
+    try:
+        st.query_params.update({"app_shutdown": "1"})
+    except Exception:
+        pass
     # Politely stop Streamlit script
     import sys
     raise SystemExit
 
+# 24/7 autorun check at top of app execution
+try:
+    # Reset stuck in-progress after long timeout (10 minutes)
+    if st.session_state.get('run_in_progress') and st.session_state.get('last_run'):
+        last_ts = datetime.fromisoformat(st.session_state['last_run'])
+        if (datetime.utcnow() - last_ts).total_seconds() > 600:
+            st.session_state['run_in_progress'] = False
+    if st.session_state.get('continuous'):
+        last = st.session_state.get('last_run')
+        if last:
+            elapsed_min = (datetime.utcnow() - datetime.fromisoformat(last)).total_seconds() / 60.0
+            if elapsed_min >= float(st.session_state.get('interval_minutes', 60)):
+                st.session_state['autorun_pending'] = True
+        else:
+            st.session_state['autorun_pending'] = True
+except Exception:
+    pass
+
 def _run_analysis_now():
-    """Execute a single analysis run with proper state management"""
     st.session_state['data'] = None
     st.session_state['results'] = None
     st.session_state['cancel_token']['stop'] = False
     st.session_state['run_in_progress'] = True
-    
     # Progress UI: live counter + ETA + progress bar
     progress_placeholder = st.empty()
     bar = st.progress(0, text="Preparing...")
@@ -219,9 +219,14 @@ def _run_analysis_now():
                 progress_callback=on_progress,
                 cancel_token=st.session_state['cancel_token']
             )
+            # Apply pre-normalization filters on the DataFrame for display
+            if df is not None and len(df) > 0:
+                df = df[(df['Profit'] > float(config['min_profit'])) &
+                        (df['Profit Margin'] > float(config['min_margin'])) &
+                        (df['Volume (48h)'] >= float(config['min_volume']))]
             st.session_state['data'] = df
             st.session_state['results'] = results
-            st.session_state['last_run_iso'] = datetime.utcnow().isoformat()
+            st.session_state['last_run'] = datetime.utcnow().isoformat()
             st.session_state['autorun_pending'] = False
             st.session_state['run_in_progress'] = False
             st.success("Analysis complete! 🎉")
@@ -230,17 +235,15 @@ def _run_analysis_now():
             st.session_state['run_in_progress'] = False
             st.error(f"API fetch failed – try again!\n{e}")
 
-# Manual run trigger
+
 if run_btn:
     _run_analysis_now()
 
-# Auto-run trigger (single execution)
+# Auto-run trigger
 if st.session_state.get('autorun_pending') and not st.session_state.get('run_in_progress'):
     st.session_state['autorun_pending'] = False
     _run_analysis_now()
     st.rerun()
-
-# Display results
 if st.session_state['data'] is not None:
     df = st.session_state['data']
     st.subheader("Results Table")
@@ -274,16 +277,17 @@ if st.session_state['data'] is not None:
                 top = df.iloc[0]
                 st.markdown(f"**Set Name:** {top['Set Name']}")
                 st.markdown(f"**Profit:** {top['Profit']}")
-                st.markdown(f"**Margin:** {top['Margin']}")
-                st.markdown(f"**Price (sell):** {top['Price (sell)']}")
-                st.markdown(f"**Price (cost):** {top['Price (cost)']}")
+                st.markdown(f"**Profit Margin:** {top['Profit Margin']}")
+                st.markdown(f"**Set Selling Price:** {top['Set Selling Price']}")
+                st.markdown(f"**Part Costs Total:** {top['Part Costs Total']}")
                 st.markdown(f"**Volume (48h):** {top['Volume (48h)']}")
-                if 'ETA (h)' in top:
-                    st.markdown(f"**ETA (h):** {top['ETA (h)']}")
-                if 'Profit/day' in top:
-                    st.markdown(f"**Profit/day:** {top['Profit/day']}")
-                if f"Trend % ({int(config['trend_days'])}d)" in df.columns:
-                    st.markdown(f"**Trend % ({int(config['trend_days'])}d):** {top[f'Trend % ({int(config['trend_days'])}d)']}")
+                if 'ETA (hours)' in top:
+                    st.markdown(f"**ETA (hours):** {top['ETA (hours)']}")
+                if 'Profit/Day' in top:
+                    st.markdown(f"**Profit/Day:** {top['Profit/Day']}")
+                trend_col = f"Trend % ({int(config['trend_days'])}d)"
+                if trend_col in df.columns:
+                    st.markdown(f"**{trend_col}:** {top[trend_col]}")
                 st.markdown(f"**Score:** {top['Score']}")
                 st.markdown(f"**Part Prices:** {top['Part Prices']}")
                 # External link
@@ -325,44 +329,13 @@ if st.session_state['data'] is not None:
     st.subheader("📈 Statistical Analysis (Cumulative)")
     col1, col2 = st.columns([1,1])
     with col1:
-        # Helper: load cumulative dataset from normalized schema
+        # Helper: load cumulative dataset from SQLite
         def load_cumulative_df():
             try:
                 conn = sqlite3.connect(DB_PATH)
-                cur = conn.cursor()
-                # Get latest run for current platform
-                cur.execute("""
-                    SELECT r.run_id, r.ts_utc, r.platform, r.config_json
-                    FROM runs r
-                    WHERE r.platform = ?
-                    ORDER BY r.ts_utc DESC
-                    LIMIT 1
-                """, (config['platform'],))
-                run_row = cur.fetchone()
-                if not run_row:
-                    st.warning("No historical data yet.")
-                    return None
-                
-                run_id = run_row[0]
-                # Get metrics for that run
-                cur.execute("""
-                    SELECT sm.*
-                    FROM set_metrics sm
-                    WHERE sm.run_id = ?
-                    ORDER BY sm.score DESC
-                """, (run_id,))
-                rows = cur.fetchall()
+                query = "SELECT r.ts_utc as run_ts, r.platform, sm.set_slug, sm.set_name, sm.profit, sm.profit_margin, sm.set_price, sm.part_cost_total, sm.volume_48h, sm.score FROM set_metrics sm JOIN runs r ON sm.run_id = r.run_id"
+                hist_df = pd.read_sql_query(query, conn)
                 conn.close()
-                
-                if not rows:
-                    st.warning("No metrics found for latest run.")
-                    return None
-                
-                # Convert to DataFrame
-                columns = ['run_id', 'set_slug', 'set_name', 'price_sell', 'price_cost', 'profit', 'margin',
-                          'volume_48h', 'eta_hours', 'profit_per_day', 'score', 'trend_pct',
-                          'conservative_pricing', 'robust_score', 'trade_tax_percent']
-                hist_df = pd.DataFrame(rows, columns=columns)
                 return hist_df
             except Exception as e:
                 st.warning(f"No historical data yet or DB error: {e}")
@@ -412,14 +385,13 @@ if st.session_state['data'] is not None:
     with col2:
         st.info("24/7 Mode appends data every interval so regression improves over time. Adjust weights or toggles in the sidebar and rerun analysis.")
 
-    # 24/7 Mode: display status and retention cleanup
+    # 24/7 Mode: display status and schedule next run
     if st.session_state['continuous']:
         st.markdown("---")
         st.subheader("24/7 Mode Status")
-        last = st.session_state['last_run_iso'] or "Never"
+        last = st.session_state['last_run'] or "Never"
         st.markdown(f"Last run (UTC): {last}")
         st.markdown(f"Interval: {int(st.session_state['interval_minutes'])} minutes")
-        
         # Retention cleanup
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -431,6 +403,7 @@ if st.session_state['data'] is not None:
             cur.execute("SELECT run_id, ts_utc FROM runs")
             rows = cur.fetchall()
             to_delete = []
+            from datetime import timedelta
             cutoff = datetime.utcnow() - timedelta(days=int(config.get('retention_days', 90)))
             for rid, ts_s in rows:
                 try:
@@ -441,9 +414,9 @@ if st.session_state['data'] is not None:
                     continue
             if to_delete:
                 cur.execute("BEGIN;")
+                cur.executemany("DELETE FROM set_metrics WHERE run_id = ?", [(rid,) for rid in to_delete])
                 cur.executemany("DELETE FROM runs WHERE run_id = ?", [(rid,) for rid in to_delete])
                 conn.commit()
-                st.info(f"Cleaned up {len(to_delete)} old runs (older than {config.get('retention_days', 90)} days)")
             conn.close()
         except Exception:
             pass
