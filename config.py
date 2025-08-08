@@ -2,18 +2,21 @@
 
 # API Settings
 API_BASE_URL = 'https://api.warframe.market/v1'  # Base URL must include /v1
-REQUESTS_PER_SECOND = 5  # Faster default; exponential backoff still handles 429/5xx
+RPS_LIMIT = 3.0  # Requests per second limit (Warframe.market ToS)
+MAX_CONCURRENCY = 6  # Max concurrent HTTP requests
+USER_AGENT = 'WarframeSetAnalyzer/1.0 (+https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer)'
 HEADERS = {
     'Platform': 'pc',
     'Language': 'en',
-    'Accept': 'application/json'  # 'Crossplay' header removed per v1 API
+    'Accept': 'application/json',
+    'User-Agent': USER_AGENT,
 }
 
 # Output Settings
 OUTPUT_FILE = 'set_profit_analysis.csv'
 # Choose 'csv' or 'xlsx'
 OUTPUT_FORMAT = 'csv'  # 'csv' or 'xlsx'
-DEBUG_MODE = True  # Enable detailed logging
+DEBUG_MODE = False  # Gate verbose logs behind this
 
 # Scoring Settings
 PROFIT_WEIGHT = 1.0
@@ -28,12 +31,13 @@ USE_MEDIAN_PRICING = False  # Deprecated in UI
 # Always use aggregated statistics endpoint for pricing instead of raw orders (faster, smaller payloads)
 USE_STATISTICS_FOR_PRICING = True
 
+# Concurrency
+CONCURRENCY_LIMIT = MAX_CONCURRENCY
 
 # Directory where cached API responses are stored
 CACHE_DIR = 'data'
 # Number of days to keep cached API responses
 CACHE_TTL_DAYS = 7
-
 
 # Persistent storage (single-file SQLite database)
 DB_PATH = 'data/market_history.sqlite'
