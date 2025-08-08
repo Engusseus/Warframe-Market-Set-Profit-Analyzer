@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from wf_market_analyzer import run_analysis_ui
 from sklearn.linear_model import LinearRegression
 import numpy as np
@@ -20,7 +21,9 @@ except ImportError:
     st_lottie = None
     lottie_loading = None
 
-# Custom CSS for Warframe theme, button hover, progress bar glow, confetti
+st.set_page_config(page_title="Warframe Market Profit Analyzer", layout="wide", page_icon="💠")
+
+# Custom CSS for Warframe theme, button hover, progress bar glow
 st.markdown('''
     <style>
     body { background: #181c2f; }
@@ -46,8 +49,6 @@ st.markdown('''
     }
     </style>
 ''', unsafe_allow_html=True)
-
-st.set_page_config(page_title="Warframe Market Profit Analyzer", layout="wide", page_icon="💠")
 
 st.title("💠 Warframe Market Profit Analyzer")
 st.markdown("<h4>Analyze sets and uncover profits interactively!</h4>", unsafe_allow_html=True)
@@ -122,38 +123,77 @@ if st.session_state['data'] is not None:
     st.subheader("Results Table")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-    st.subheader("Profit vs. Volume Scatter Plot")
-    fig = px.scatter(df, x='Volume (48h)', y='Profit', hover_name='Set Name', color='Score',
-                     color_continuous_scale=px.colors.sequential.Purples, height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    if len(df) == 0:
+        st.warning("No results to display. Try adjusting filters/weights and rerun.")
+    else:
+        st.subheader("Profit vs. Volume Scatter Plot")
+        fig = px.scatter(
+            df,
+            x='Volume (48h)',
+            y='Profit',
+            hover_name='Set Name',
+            color='Score',
+            color_continuous_scale=px.colors.sequential.Purples,
+            height=500,
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
-    with st.expander("Show Details for Top Set"):
-        top = df.iloc[0]
-        st.markdown(f"**Set Name:** {top['Set Name']}")
-        st.markdown(f"**Profit:** {top['Profit']}")
-        st.markdown(f"**Profit Margin:** {top['Profit Margin']}")
-        st.markdown(f"**Set Selling Price:** {top['Set Selling Price']}")
-        st.markdown(f"**Part Costs Total:** {top['Part Costs Total']}")
-        st.markdown(f"**Volume (48h):** {top['Volume (48h)']}")
-        st.markdown(f"**Score:** {top['Score']}")
-        st.markdown(f"**Part Prices:** {top['Part Prices']}")
+        with st.expander("Show Details for Top Set"):
+            try:
+                top = df.iloc[0]
+                st.markdown(f"**Set Name:** {top['Set Name']}")
+                st.markdown(f"**Profit:** {top['Profit']}")
+                st.markdown(f"**Profit Margin:** {top['Profit Margin']}")
+                st.markdown(f"**Set Selling Price:** {top['Set Selling Price']}")
+                st.markdown(f"**Part Costs Total:** {top['Part Costs Total']}")
+                st.markdown(f"**Volume (48h):** {top['Volume (48h)']}")
+                st.markdown(f"**Score:** {top['Score']}")
+                st.markdown(f"**Part Prices:** {top['Part Prices']}")
+            except Exception:
+                st.info("No top set details available.")
 
     st.markdown("---")
     st.subheader("📈 Statistical Analysis")
     col1, col2 = st.columns([1,1])
     with col1:
         if st.button("Run Linear Regression (Profit vs. Volume)"):
-            X = df[['Volume (48h)']].values
-            y = df['Profit'].values
-            model = LinearRegression().fit(X, y)
-            coef = model.coef_[0]
-            intercept = model.intercept_
-            st.success(f"Profit = {coef:.2f} × Volume + {intercept:.2f}")
-            # Plot with trendline
-            fig2 = px.scatter(df, x='Volume (48h)', y='Profit', trendline='ols',
-                              color='Score', color_continuous_scale=px.colors.sequential.Purples)
-            st.plotly_chart(fig2, use_container_width=True)
-            st.markdown("<script>window.confetti && window.confetti();</script>", unsafe_allow_html=True)
+            try:
+                # Prepare data and validate
+                X = df[['Volume (48h)']].values.astype(float)
+                y = df['Profit'].values.astype(float)
+                if len(X) < 2 or np.allclose(X, X[0]):
+                    st.warning("Not enough variation in Volume to fit a regression.")
+                else:
+                    model = LinearRegression().fit(X, y)
+                    coef = float(model.coef_[0])
+                    intercept = float(model.intercept_)
+                    r2 = float(model.score(X, y))
+                    st.success(f"Profit = {coef:.4f} × Volume + {intercept:.4f}  (R² = {r2:.4f})")
+
+                    # Build regression line
+                    x_sorted = np.sort(X.flatten())
+                    y_pred = coef * x_sorted + intercept
+
+                    # Plot scatter + regression line without requiring statsmodels
+                    fig2 = go.Figure()
+                    fig2.add_trace(
+                        go.Scatter(
+                            x=df['Volume (48h)'], y=df['Profit'], mode='markers',
+                            marker=dict(color=df['Score'], colorscale='Purples', showscale=True),
+                            text=df['Set Name'], name='Data'
+                        )
+                    )
+                    fig2.add_trace(
+                        go.Scatter(
+                            x=x_sorted, y=y_pred, mode='lines', name='Regression Line',
+                            line=dict(color='#8f94fb', width=3)
+                        )
+                    )
+                    fig2.update_layout(height=500, xaxis_title='Volume (48h)', yaxis_title='Profit')
+                    st.plotly_chart(fig2, use_container_width=True)
+                    st.balloons()
+            except Exception as ex:
+                st.error(f"Linear regression failed: {ex}")
     with col2:
         st.info("Try adjusting weights or toggles in the sidebar and rerun analysis for different results!")
 

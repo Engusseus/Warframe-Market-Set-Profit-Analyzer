@@ -13,7 +13,7 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
 - **Configurable Weights & Options**: Adjust profit, volume, and margin weights, pricing method, and more from the sidebar.
 - **Live Progress, Animations, and Effects**: Enjoy spinners, Lottie animations, and confetti.
 - **Results Table & Plot**: View sortable tables and interactive scatter plots of profit vs. volume.
-- **(Planned) Linear Regression**: Button for statistical analysis (currently not working yet; see below).
+- **Linear Regression (Profit vs. Volume)**: Run statistical analysis with a regression line and R² displayed.
 - **All CLI features still available**: You can still run the classic script for CSV/XLSX output.
 - **Improved error handling, caching, and async performance**.
 
@@ -22,7 +22,6 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
 ## ⚠️ Development Status
 
 - This is the **dev branch**. Features may be experimental, incomplete, or break unexpectedly.
-- **Linear regression/statistical analysis button is present in the UI, but not fully functional yet.**
 - Please report issues or unexpected behavior!
 
 ---
@@ -113,13 +112,12 @@ python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
 - **Results Table**: Sortable, filterable table of all sets
 - **Scatter Plot**: Interactive profit vs. volume plot
 - **Expandable Details**: Click to see breakdown for top set
-- **Statistical Analysis**: Button for linear regression (currently not working)
+- **Statistical Analysis**: Button for linear regression with regression line and R²
 
 ---
 
 ## Known Issues / Limitations
 
-- **Linear regression/statistical analysis is not working yet** (button is present but not functional)
 - This is a development branch: features may break, change, or be removed at any time
 - API changes or downtime may cause errors
 - Some features (e.g., confetti, Lottie) require a modern browser

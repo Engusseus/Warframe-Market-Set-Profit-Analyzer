@@ -203,6 +203,12 @@ class SetProfitAnalyzer:
             analyze_trends: Whether to calculate volume trends
             trend_days: Number of days to use for trend calculations
         """
+        # Ensure cache directory exists before any file operations
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+        except Exception:
+            # Fall back silently; caching will be disabled if directory cannot be created
+            pass
         purge_old_cache_files()
         self.api = WarframeMarketAPI()
         self.sets = {}  # slug -> SetData
@@ -272,6 +278,11 @@ class SetProfitAnalyzer:
     def _save_cache(self, prefix: str, slug: str, data: dict) -> None:
         """Save data to cache"""
         path = self._get_cache_path(prefix, slug)
+        # Ensure cache directory exists
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        except Exception:
+            pass
         try:
             with open(path, 'w') as f:
                 json.dump(data, f)
