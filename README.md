@@ -10,12 +10,15 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
 
 - **Interactive Streamlit UI**: Run a beautiful, animated web dashboard to analyze and visualize profits and volumes.
 - **One-click Launch**: Just double-click `run-analyzer.bat` on Windows to launch the UI in your browser.
-- **Configurable Weights & Options**: Adjust profit, volume, and margin weights, pricing method, and more from the sidebar.
+- **Configurable Weights & Options**: Adjust profit, volume, and margin weights and the minimum online sample size from the sidebar.
 - **Live Progress, Animations, and Effects**: Enjoy spinners, Lottie animations, and confetti.
 - **Results Table & Plot**: View sortable tables and interactive scatter plots of profit vs. volume.
 - **Linear Regression (Profit vs. Volume)**: Run statistical analysis with a regression line and R² displayed.
 - **Persistent Analytics (SQLite)**: Each run appends results to a single local SQLite DB for cumulative analysis.
 - **24/7 Mode**: Optional continuous mode to fetch and append data every N minutes (default 60).
+- **Faster Analysis**: Concurrency improvements, fewer requests per set using include=item, and statistics-based pricing (now the default).
+- **Live Progress + Controls**: Visible progress bar with ETA and counters, Stop (no save), and Quit (immediate exit) buttons.
+- **API Spec Included**: The Warframe.market OpenAPI spec used by the app is included in this repo as `api-doc.da4693bf305141492c84.yml`.
 - **All CLI features still available**: You can still run the classic script for CSV/XLSX output.
 - **Improved error handling, caching, and async performance**.
 
@@ -37,16 +40,16 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
 - Generates a CSV or XLSX report ordered by score for easy decision-making
 - Saves a scatter plot of profit vs. volume for quick visualization
 - **Interactive UI**: Run, configure, and visualize everything in your browser
-- **Sidebar config**: Adjust platform, weights, pricing method, and more
-- **Progress bars, spinners, and Lottie animations**
+- **Sidebar config**: Adjust weights and the minimum online sample size
+- **Live progress, ETA, spinners, and Lottie animations**
 - **Expandable details for top sets**
-- **(Planned) Linear regression analysis**
+- **Linear regression analysis** (cumulative, over historical runs)
 
 ---
 
 ## Requirements
 
-- Python 3.7+
+- Python 3.8+
 - Dependencies listed in `requirements.txt` **plus**:
   - `streamlit`, `plotly`, `scikit-learn`, `streamlit-lottie`
 
@@ -96,7 +99,7 @@ A Python tool and interactive web app that analyzes the Warframe Market API to f
 
 ### Classic CLI Usage
 
-You can still run the classic script for CSV/XLSX output:
+You can still run the classic script for CSV/XLSX output (deprecated in UI mode):
 ```bash
 python wf_market_analyzer.py
 ```
@@ -110,18 +113,17 @@ python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
 
 ## UI Features & Options
 
-- **Platform**: Choose PC, PS4, Xbox, or Switch
 - **Profit/Volume/Margin Weights**: Adjust how each factor affects the score
-- **Price Sample Size**: Number of orders to average/median
-- **Median Pricing**: Toggle between average and median price calculations
-- **Volume Trends**: Optionally analyze volume trends over N days
+- **Minimum Online Sell Orders (Sample Size)**: A set is included only if it has at least this many online sell orders; parts must have at least this many 48h statistic price points
 - **Debug Mode**: Enable detailed logging
-- **Live Progress**: See spinners, progress bars, and Lottie animations during analysis
+- **Live Progress**: See counters, ETA, progress bar, and animations during analysis
 - **Results Table**: Sortable, filterable table of all sets
 - **Scatter Plot**: Interactive profit vs. volume plot
 - **Expandable Details**: Click to see breakdown for top set
 - **Statistical Analysis**: Button for linear regression with regression line and R² using all historical runs
 - **24/7 Mode**: Automatically append data every N minutes
+ - **Stop**: Immediately stop the current run without saving partial data
+ - **Quit**: Exit the application entirely
 
 ---
 
@@ -131,6 +133,8 @@ python wf_market_analyzer.py --platform xbox --output-file xbox_results.csv \
 - API changes or downtime may cause errors
 - Some features (e.g., confetti, Lottie) require a modern browser
 - Continuous mode depends on the app staying open; server sleep may pause scheduling
+- CSV/JSON exports are deprecated in favor of the UI and SQLite persistence (still available via CLI if needed)
+- API spec file `api-doc.da4693bf305141492c84.yml` is included for reference (the service may change endpoints/fields over time)
 
 ---
 
@@ -141,13 +145,10 @@ Adjust the values in `config.py` for CLI defaults, or use the sidebar in the UI 
 - `API_BASE_URL`: Base URL for the Warframe Market API
 - `REQUESTS_PER_SECOND`: Control the request rate
 - `PROFIT_WEIGHT`, `VOLUME_WEIGHT`, and `PROFIT_MARGIN_WEIGHT`: Balance profit, profit margin, and trading volume in the score
-- `OUTPUT_FILE`: File path for the generated CSV/XLSX
-- `DEBUG_MODE`: Enable or disable detailed logging
-- `PRICE_SAMPLE_SIZE`: Number of orders to sample when calculating prices
-- `USE_MEDIAN_PRICING`: Use the median price of the sampled orders instead of the average
-- `CACHE_DIR`: Directory where cached API responses are stored
-- `CACHE_TTL_DAYS`: Number of days to keep cache files before they expire
-- `DB_PATH`: Path to the SQLite DB for cumulative analytics
+- `PRICE_SAMPLE_SIZE`: Minimum online sell orders for a set, and minimum 48h statistic price points for parts
+- `USE_STATISTICS_FOR_PRICING`: Always true in the UI; pricing based on `/statistics` for speed and stability
+- `DB_PATH`: Path to the SQLite DB for cumulative analytics (all data is stored here)
+- Other legacy options (e.g., median pricing, CSV/XLSX) are deprecated in the UI path
 
 ---
 

@@ -59,23 +59,25 @@ st.markdown("<h4>Analyze sets and uncover profits interactively!</h4>", unsafe_a
 # Sidebar config
 def sidebar_config():
     st.sidebar.header("Configuration")
-    platform = st.sidebar.selectbox("Platform", ["pc", "ps4", "xbox", "switch"], index=0)
+    # Platform is fixed to 'pc' via headers; hiding from UI to reduce confusion
     profit_weight = st.sidebar.slider("Profit Weight", 0.0, 3.0, 1.0, 0.1)
     volume_weight = st.sidebar.slider("Volume Weight", 0.0, 3.0, 1.2, 0.1)
     profit_margin_weight = st.sidebar.slider("Profit Margin Weight", 0.0, 3.0, 0.0, 0.1)
-    price_sample_size = st.sidebar.slider("Price Sample Size", 1, 10, 2, 1)
-    use_median_pricing = st.sidebar.checkbox("Use Median Pricing", False)
-    analyze_trends = st.sidebar.checkbox("Analyze Volume Trends", False)
-    trend_days = st.sidebar.slider("Trend Days", 7, 90, 30, 1) if analyze_trends else 30
+    price_sample_size = st.sidebar.slider("Minimum Online Sell Orders (Sample Size)", 1, 10, 2, 1,
+                                          help="Minimum number of online sell orders required to include a set/part")
+    # Removed median pricing and statistics toggle – statistics is always used
+    analyze_trends = False
+    trend_days = 30
     debug = st.sidebar.checkbox("Debug Mode", False)
     # Explicitly cast all values to correct types
     return dict(
-        platform=str(platform),
+        platform='pc',
         profit_weight=float(profit_weight),
         volume_weight=float(volume_weight),
         profit_margin_weight=float(profit_margin_weight),
         price_sample_size=int(price_sample_size),
-        use_median_pricing=bool(use_median_pricing),
+        use_median_pricing=False,
+        use_statistics_for_pricing=True,
         analyze_trends=bool(analyze_trends),
         trend_days=int(trend_days),
         debug=bool(debug),
@@ -99,6 +101,8 @@ Click below to start! 🚀
 col_run, col_toggle = st.columns([2, 2])
 with col_run:
     run_btn = st.button("Run Analysis", type="primary")
+    stop_btn = st.button("Stop")
+    quit_btn = st.button("Quit")
 with col_toggle:
     st.checkbox("24/7 Mode", key='continuous', help="Continuously fetch and append data.")
     if st.session_state['continuous']:
@@ -106,9 +110,46 @@ with col_toggle:
             "Interval (minutes)", min_value=5, max_value=240, value=60, step=5
         )
 
+if stop_btn:
+    # Signal stop by setting a flag in session
+    st.session_state['cancel'] = True
+    st.info("Stopping after current in-flight tasks...")
+
+if quit_btn:
+    st.session_state['cancel'] = True
+    st.success("Quitting...")
+    # Streamlit 1.32+: use st.query_params to avoid deprecation warning
+    try:
+        st.query_params.update({"app_shutdown": "1"})
+    except Exception:
+        pass
+    # Force terminate the script
+    import os, sys
+    os._exit(0)
+
 if run_btn:
     st.session_state['data'] = None
     st.session_state['results'] = None
+    st.session_state['cancel'] = False
+    # Progress UI: live counter + ETA + progress bar
+    progress_placeholder = st.empty()
+    bar = st.progress(0, text="Preparing...")
+    counter = st.empty()
+    eta = st.empty()
+    start_ts = datetime.utcnow()
+
+    def on_progress(processed: int, total: int):
+        pct = int((processed / total) * 100) if total else 0
+        bar.progress(min(pct, 100), text=f"Analyzing sets... {pct}%")
+        counter.markdown(f"Processed {processed} of {total} sets")
+        if processed > 0:
+            elapsed = (datetime.utcnow() - start_ts).total_seconds()
+            rate = processed / max(elapsed, 1e-6)
+            remaining = (total - processed) / max(rate, 1e-6)
+            eta.markdown(f"ETA: ~{int(remaining)}s")
+        else:
+            eta.markdown("ETA: estimating...")
+
     with st.spinner("Fetching and analyzing sets... this may take a minute!"):
         if st_lottie and lottie_loading:
             st_lottie(lottie_loading, height=120, key="loading")
@@ -121,9 +162,13 @@ if run_btn:
                 profit_margin_weight=float(config['profit_margin_weight']),
                 price_sample_size=int(config['price_sample_size']),
                 use_median_pricing=bool(config['use_median_pricing']),
+                use_statistics_for_pricing=bool(config.get('use_statistics_for_pricing', False)),
                 analyze_trends=bool(config['analyze_trends']),
                 trend_days=int(config['trend_days']),
-                debug=bool(config['debug'])
+                debug=bool(config['debug']),
+                persist=True,
+                progress_callback=on_progress,
+                cancel_token={"stop": st.session_state.get('cancel', False)}
             )
             st.session_state['data'] = df
             st.session_state['results'] = results

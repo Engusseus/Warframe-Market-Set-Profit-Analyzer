@@ -12,7 +12,7 @@ import logging
 import os
 import glob
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -29,6 +29,7 @@ from config import (
     PROFIT_MARGIN_WEIGHT,
     PRICE_SAMPLE_SIZE,
     USE_MEDIAN_PRICING,
+    USE_STATISTICS_FOR_PRICING,
     CACHE_DIR,
     CACHE_TTL_DAYS,
     OUTPUT_FORMAT,
@@ -112,12 +113,13 @@ class ResultData:
 class WarframeMarketAPI:
     """Client for interacting with the Warframe Market API"""
 
-    def __init__(self):
+    def __init__(self, cancel_token: Optional[dict] = None):
         """Initialize the API client with rate limiting"""
         self.session = None
         self.last_request_time = 0
         self.request_interval = 1.0 / REQUESTS_PER_SECOND
         self._lock = asyncio.Lock()
+        self.cancel_token = cancel_token or {"stop": False}
 
     async def initialize(self):
         """Create the HTTP session"""
@@ -152,6 +154,9 @@ class WarframeMarketAPI:
         backoff = 1  # Initial backoff in seconds
 
         while retries <= max_retries:
+            # Fast-cancel
+            if self.cancel_token.get("stop"):
+                raise asyncio.CancelledError()
             await self._rate_limit()
             url = f"{API_BASE_URL}{endpoint}"
 
@@ -197,7 +202,13 @@ class WarframeMarketAPI:
 class SetProfitAnalyzer:
     """Main class for analyzing set profits"""
 
-    def __init__(self, analyze_trends: bool = False, trend_days: int = 30):
+    def __init__(
+        self,
+        analyze_trends: bool = False,
+        trend_days: int = 30,
+        cancel_token: Optional[dict] = None,
+        on_progress: Optional[Callable[[int, int], None]] = None,
+    ):
         """Initialize the analyzer
 
         Args:
@@ -211,11 +222,13 @@ class SetProfitAnalyzer:
             # Fall back silently; caching will be disabled if directory cannot be created
             pass
         purge_old_cache_files()
-        self.api = WarframeMarketAPI()
+        self.cancel_token = cancel_token or {"stop": False}
+        self.api = WarframeMarketAPI(cancel_token=self.cancel_token)
         self.sets = {}  # slug -> SetData
         self.results = []  # List of ResultData
         self.analyze_trends = analyze_trends
         self.trend_days = trend_days
+        self.on_progress = on_progress
 
     def generate_scatter_plot(self) -> None:
         """Create a scatter plot of profit vs volume and save it as an image"""
@@ -301,60 +314,29 @@ class SetProfitAnalyzer:
 
         return data['payload']['items']
 
-    async def fetch_set_data(self, set_slug: str) -> Optional[SetData]:
-        """
-        Fetch set information for a given set slug
-
-        Args:
-            set_slug: Slug identifier for the set
-
-        Returns:
-            SetData object or None if the set could not be fetched
-        """
-        logger.info(f"Fetching set data for: {set_slug}")
-        data = await self.api.get(f"/items/{set_slug}")
-
-        if not data or 'payload' not in data or 'item' not in data['payload'] or 'items_in_set' not in data['payload']['item']:
-            logger.error(f"Failed to fetch set data for {set_slug}")
+    async def extract_set_from_include(self, set_slug: str, include: Dict) -> Optional[SetData]:
+        """Build SetData from include.item.items_in_set provided by orders?include=item."""
+        item = include.get('item') if include else None
+        if not item or 'items_in_set' not in item:
+            logger.error(f"Missing include.item for set {set_slug}")
             return None
-
-        # Extract relevant info from the response
-        set_items = data['payload']['item']['items_in_set']
+        set_items = item['items_in_set']
         set_name = None
-        parts = {}
-        part_names = {}
-
-        # First, find the set itself to get the name
-        for item in set_items:
-            if item['url_name'] == set_slug:
-                set_name = item.get('en', {}).get('item_name', set_slug)
-                break
-
+        parts: Dict[str, int] = {}
+        part_names: Dict[str, str] = {}
+        for it in set_items:
+            if it.get('url_name') == set_slug:
+                set_name = it.get('en', {}).get('item_name', set_slug)
         if not set_name:
-            logger.warning(f"Could not find name for set {set_slug}")
-            set_name = set_slug  # Fallback to using the slug as name
-
-        # Then process all parts
-        for item in set_items:
-            # Skip the set itself
-            if item['url_name'] == set_slug:
+            set_name = set_slug
+        for it in set_items:
+            if it.get('url_name') == set_slug:
                 continue
-
-            # Get part quantity
-            quantity = item.get('quantity_for_set', 1)
-
-            # Get part name
-            part_name = item.get('en', {}).get('item_name', item['url_name'])
-
-            parts[item['url_name']] = quantity
-            part_names[item['url_name']] = part_name
-
-        return SetData(
-            slug=set_slug,
-            name=set_name,
-            parts=parts,
-            part_names=part_names
-        )
+            quantity = it.get('quantity_for_set', 1)
+            part_name = it.get('en', {}).get('item_name', it.get('url_name'))
+            parts[it.get('url_name')] = quantity
+            part_names[it.get('url_name')] = part_name
+        return SetData(slug=set_slug, name=set_name, parts=parts, part_names=part_names)
 
     async def fetch_orders(self, item_slug: str) -> List[Dict]:
         """
@@ -368,9 +350,7 @@ class SetProfitAnalyzer:
         """
         logger.info(f"Fetching orders for: {item_slug}")
 
-        cache = self._load_cache('orders', item_slug)
-        if cache is not None:
-            return cache
+        # Avoid creating many small files: do not cache orders to disk
 
         data = await self.api.get(f"/items/{item_slug}/orders")
 
@@ -388,8 +368,17 @@ class SetProfitAnalyzer:
         if DEBUG_MODE:
             logger.debug(f"Found {len(orders)} orders from online players for {item_slug}")
 
-        self._save_cache('orders', item_slug, orders)
         return orders
+
+    async def fetch_statistics(self, item_slug: str) -> Dict:
+        """Fetch statistics for a specific item (smaller payload than orders)."""
+        logger.info(f"Fetching statistics for: {item_slug}")
+        # Avoid creating many small files: do not cache statistics to disk
+        data = await self.api.get(f"/items/{item_slug}/statistics")
+        if not data or 'payload' not in data or 'statistics_closed' not in data['payload']:
+            logger.error(f"Failed to fetch statistics for {item_slug}")
+            return {}
+        return data['payload']['statistics_closed']
 
     def calculate_average_price(self, orders: List[Dict], order_type: str, count: int = PRICE_SAMPLE_SIZE) -> Optional[float]:
         """
@@ -465,17 +454,11 @@ class SetProfitAnalyzer:
         """
         logger.info(f"Calculating profit for set: {set_data.name}")
 
-        # Fetch set orders
-        set_orders = await self.fetch_orders(set_data.slug)
-        if not set_orders:
-            logger.error(f"No orders found for set {set_data.slug}")
-            return None
-
-        # Calculate selling price for the set
-        if USE_MEDIAN_PRICING:
-            set_price = self.calculate_median_price(set_orders, 'sell')
-        else:
-            set_price = self.calculate_average_price(set_orders, 'sell')
+        # Always use statistics for pricing (faster)
+        stats = await self.fetch_statistics(set_data.slug)
+        # Use last 48h median/avg sell price if available
+        prices = [s.get('median') or s.get('avg_price') for s in stats.get('48hours', []) if s.get('median') or s.get('avg_price')]
+        set_price = float(np.median(prices)) if prices else None
         if set_price is None:
             logger.error(f"Could not calculate sell price for set {set_data.slug}")
             return None
@@ -485,29 +468,29 @@ class SetProfitAnalyzer:
         total_part_cost = 0
         missing_parts = []
 
-        for part_slug, quantity in set_data.parts.items():
-            # Fetch part orders
-            part_orders = await self.fetch_orders(part_slug)
-            if not part_orders:
-                logger.warning(f"No orders found for part {part_slug}")
-                missing_parts.append(part_slug)
-                continue
+        async def price_part(part_slug: str, quantity: int):
+            nonlocal missing_parts
+            try:
+                stats = await self.fetch_statistics(part_slug)
+                prices = [s.get('median') or s.get('avg_price') for s in stats.get('48hours', []) if s.get('median') or s.get('avg_price')]
+                # Enforce minimum sample size from 48h stats as a proxy for available pricing points
+                if len(prices) < PRICE_SAMPLE_SIZE:
+                    return (part_slug, None)
+                p = float(np.median(prices)) if prices else None
+                return (part_slug, p)
+            except Exception:
+                return (part_slug, None)
 
-            # Calculate selling price for the part
-            if USE_MEDIAN_PRICING:
-                part_price = self.calculate_median_price(part_orders, 'sell')
-            else:
-                part_price = self.calculate_average_price(part_orders, 'sell')
-            if part_price is None:
+        tasks = [asyncio.create_task(price_part(slug, qty)) for slug, qty in set_data.parts.items()]
+        results = await asyncio.gather(*tasks)
+        for part_slug, p in results:
+            qty = set_data.parts[part_slug]
+            if p is None:
                 logger.warning(f"Could not calculate price for part {part_slug}")
                 missing_parts.append(part_slug)
                 continue
-
-            # Store part price
-            part_prices[part_slug] = part_price
-
-            # Add to total cost (accounting for quantity)
-            total_part_cost += part_price * quantity
+            part_prices[part_slug] = p
+            total_part_cost += p * qty
 
         # Skip sets with missing part prices
         if missing_parts:
@@ -538,9 +521,7 @@ class SetProfitAnalyzer:
         """
         logger.info(f"Fetching volume data for set: {set_slug}")
 
-        cache = self._load_cache('volume', set_slug)
-        if cache is not None:
-            return VolumeData(volume_48h=cache.get('volume_48h', 0), trend=cache.get('trend'))
+        # No on-disk caching to avoid many small files
 
         # Use the statistics endpoint to get volume data
         data = await self.api.get(f"/items/{set_slug}/statistics")
@@ -554,8 +535,6 @@ class SetProfitAnalyzer:
 
         if DEBUG_MODE:
             logger.debug(f"48-hour volume for {set_slug}: {volume_48h}")
-
-        self._save_cache('volume', set_slug, {'volume_48h': volume_48h})
 
         return VolumeData(volume_48h=volume_48h)
 
@@ -650,9 +629,21 @@ class SetProfitAnalyzer:
         """Process a single set and return its analysis result"""
         set_slug = set_item['url_name']
 
-        # Fetch set data (parts and quantities)
-        set_data = await self.fetch_set_data(set_slug)
+        # Prefer pulling include.item along with orders to avoid separate item fetch
+        include_resp = await self.api.get(f"/items/{set_slug}/orders?include=item")
+        if not include_resp or 'payload' not in include_resp:
+            return None
+        include = include_resp.get('include', {})
+        set_data = await self.extract_set_from_include(set_slug, include)
         if not set_data:
+            return None
+
+        # Enforce minimum number of online sell orders for the set
+        online_statuses = ['ingame', 'online']
+        orders = include_resp.get('payload', {}).get('orders', [])
+        online_sell = [o for o in orders if o.get('order_type') == 'sell' and o.get('user', {}).get('status') in online_statuses]
+        if len(online_sell) < PRICE_SAMPLE_SIZE:
+            logger.info(f"Skipping {set_slug}: only {len(online_sell)} online sell orders (< {PRICE_SAMPLE_SIZE})")
             return None
 
         # Calculate profit
@@ -688,10 +679,26 @@ class SetProfitAnalyzer:
         tasks = [asyncio.create_task(self.process_set(item)) for item in set_items]
 
         results = []
-        for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Analyzing sets"):
+        total = len(tasks)
+        processed = 0
+        if self.on_progress:
+            try:
+                self.on_progress(processed, total)
+            except Exception:
+                pass
+        for future in tqdm(asyncio.as_completed(tasks), total=total, desc="Analyzing sets"):
+            if self.cancel_token.get("stop"):
+                logger.info("Cancellation requested. Stopping analysis loop.")
+                break
             result = await future
             if result:
                 results.append(result)
+            processed += 1
+            if self.on_progress:
+                try:
+                    self.on_progress(processed, total)
+                except Exception:
+                    pass
 
         # Normalize data and calculate scores
         results = self.normalize_data(results)
@@ -728,6 +735,17 @@ class SetProfitAnalyzer:
                 )
                 """
             )
+            # Optional volume table for future expansions (single DB, no files)
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS volume_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_ts TEXT NOT NULL,
+                    set_slug TEXT,
+                    volume_48h INTEGER
+                )
+                """
+            )
 
             run_ts = datetime.utcnow().isoformat()
             platform = HEADERS.get("Platform", "pc")
@@ -757,6 +775,12 @@ class SetProfitAnalyzer:
                 """,
                 rows,
             )
+            # Also persist volumes to the table (one row per set)
+            vol_rows = [(run_ts, r.set_data.slug, int(r.volume_data.volume_48h)) for r in self.results]
+            cur.executemany(
+                "INSERT INTO volume_snapshots (run_ts, set_slug, volume_48h) VALUES (?, ?, ?)",
+                vol_rows,
+            )
             conn.commit()
             conn.close()
             logger.info(f"Persisted {len(rows)} rows to {DB_PATH}")
@@ -775,22 +799,27 @@ def run_analysis_ui(
     profit_margin_weight=0.0,
     price_sample_size=2,
     use_median_pricing=False,
+    use_statistics_for_pricing=False,
     analyze_trends=False,
     trend_days=30,
     debug=False,
+    persist=True,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    cancel_token: Optional[dict] = None,
 ):
     """
     Run the analyzer and return a DataFrame and raw results for UI use.
     Does not save files or plots.
     """
     import asyncio
-    global HEADERS, PROFIT_WEIGHT, VOLUME_WEIGHT, PROFIT_MARGIN_WEIGHT, PRICE_SAMPLE_SIZE, USE_MEDIAN_PRICING, DEBUG_MODE
+    global HEADERS, PROFIT_WEIGHT, VOLUME_WEIGHT, PROFIT_MARGIN_WEIGHT, PRICE_SAMPLE_SIZE, USE_MEDIAN_PRICING, USE_STATISTICS_FOR_PRICING, DEBUG_MODE
     HEADERS["Platform"] = platform
     PROFIT_WEIGHT = profit_weight
     VOLUME_WEIGHT = volume_weight
     PROFIT_MARGIN_WEIGHT = profit_margin_weight
     PRICE_SAMPLE_SIZE = price_sample_size
     USE_MEDIAN_PRICING = use_median_pricing
+    USE_STATISTICS_FOR_PRICING = use_statistics_for_pricing
     DEBUG_MODE = debug
 
     if DEBUG_MODE:
@@ -799,12 +828,19 @@ def run_analysis_ui(
     analyzer = SetProfitAnalyzer(
         analyze_trends=analyze_trends,
         trend_days=trend_days,
+        cancel_token=cancel_token or {"stop": False},
+        on_progress=progress_callback,
     )
 
     async def _run():
         await analyzer.initialize()
-        await analyzer.analyze_all_sets()
-        await analyzer.close()
+        try:
+            await analyzer.analyze_all_sets()
+            # Only persist if not cancelled
+            if persist and not analyzer.cancel_token.get("stop"):
+                analyzer.save_results()
+        finally:
+            await analyzer.close()
         # Prepare DataFrame
         csv_data = []
         for result in analyzer.results:

@@ -2,7 +2,7 @@
 
 # API Settings
 API_BASE_URL = 'https://api.warframe.market/v1'  # Base URL must include /v1
-REQUESTS_PER_SECOND = 2  # Rate limit to avoid API throttling
+REQUESTS_PER_SECOND = 5  # Faster default; exponential backoff still handles 429/5xx
 HEADERS = {
     'Platform': 'pc',
     'Language': 'en',
@@ -23,7 +23,10 @@ PROFIT_MARGIN_WEIGHT = 0.0  # Set >0 to factor profit margin into scores
 # Get average/median prices from this many orders
 PRICE_SAMPLE_SIZE = 2
 # Use median pricing instead of averaging when calculating prices
-USE_MEDIAN_PRICING = False
+USE_MEDIAN_PRICING = False  # Deprecated in UI
+
+# Always use aggregated statistics endpoint for pricing instead of raw orders (faster, smaller payloads)
+USE_STATISTICS_FOR_PRICING = True
 
 
 # Directory where cached API responses are stored

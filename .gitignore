@@ -37,4 +37,18 @@ env/
 set_profit_analysis.csv
 set_profit_analysis.xlsx
 set_profit_analysis_detailed.json
+# Legacy caches (no longer produced)
 data/*.json
+# SQLite databases
+data/*.sqlite
+*.sqlite
+*.db
+
+# Streamlit cache/state
+.streamlit/
+
+# Logs
+*.log
+
+# Test cache
+.pytest_cache/
