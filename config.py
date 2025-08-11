@@ -2,7 +2,7 @@
 
 # API Settings
 API_BASE_URL = 'https://api.warframe.market/v1'  # Base URL must include /v1
-REQUESTS_PER_SECOND = 5  # Faster default; exponential backoff still handles 429/5xx
+REQUESTS_PER_SECOND = 3  # Slower default to comply with API ToS; exponential backoff still handles 429/5xx
 HEADERS = {
     'Platform': 'pc',
     'Language': 'en',

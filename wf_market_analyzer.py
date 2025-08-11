@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import glob
+import sqlite3
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
@@ -123,7 +124,8 @@ class WarframeMarketAPI:
 
     async def initialize(self):
         """Create the HTTP session"""
-        self.session = aiohttp.ClientSession(headers=HEADERS)
+        timeout = aiohttp.ClientTimeout(total=30)  # 30-second total timeout
+        self.session = aiohttp.ClientSession(headers=HEADERS, timeout=timeout)
 
     async def close(self):
         """Close the HTTP session"""
@@ -314,21 +316,15 @@ class SetProfitAnalyzer:
 
         return data['payload']['items']
 
-    async def extract_set_from_include(self, set_slug: str, include: Dict) -> Optional[SetData]:
-        """Build SetData from include.item.items_in_set provided by orders?include=item."""
-        item = include.get('item') if include else None
+    async def extract_set_from_item_info(self, set_slug: str, item: Dict) -> Optional[SetData]:
+        """Build SetData from item details."""
         if not item or 'items_in_set' not in item:
-            logger.error(f"Missing include.item for set {set_slug}")
+            logger.error(f"Missing items_in_set for set {set_slug}")
             return None
         set_items = item['items_in_set']
-        set_name = None
+        set_name = item.get('en', {}).get('item_name', set_slug)
         parts: Dict[str, int] = {}
         part_names: Dict[str, str] = {}
-        for it in set_items:
-            if it.get('url_name') == set_slug:
-                set_name = it.get('en', {}).get('item_name', set_slug)
-        if not set_name:
-            set_name = set_slug
         for it in set_items:
             if it.get('url_name') == set_slug:
                 continue
@@ -442,25 +438,25 @@ class SetProfitAnalyzer:
 
         return float(np.median(prices))
 
+    async def get_price_from_orders(self, item_slug: str) -> Optional[float]:
+        """Get the price of an item from its orders."""
+        orders = await self.fetch_orders(item_slug)
+        if not orders:
+            return None
+
+        price_func = self.calculate_median_price if USE_MEDIAN_PRICING else self.calculate_average_price
+        price = price_func(orders, 'sell', count=PRICE_SAMPLE_SIZE)
+        return price
+
     async def calculate_set_profit(self, set_data: SetData) -> Optional[PriceData]:
         """
-        Calculate profit for a set
-
-        Args:
-            set_data: SetData object with set and part information
-
-        Returns:
-            PriceData object or None if prices could not be calculated
+        Calculate profit for a set by fetching prices from orders.
         """
         logger.info(f"Calculating profit for set: {set_data.name}")
 
-        # Always use statistics for pricing (faster)
-        stats = await self.fetch_statistics(set_data.slug)
-        # Use last 48h median/avg sell price if available
-        prices = [s.get('median') or s.get('avg_price') for s in stats.get('48hours', []) if s.get('median') or s.get('avg_price')]
-        set_price = float(np.median(prices)) if prices else None
+        set_price = await self.get_price_from_orders(set_data.slug)
         if set_price is None:
-            logger.error(f"Could not calculate sell price for set {set_data.slug}")
+            logger.warning(f"Could not calculate sell price for set {set_data.slug}")
             return None
 
         # Calculate part costs
@@ -470,16 +466,8 @@ class SetProfitAnalyzer:
 
         async def price_part(part_slug: str, quantity: int):
             nonlocal missing_parts
-            try:
-                stats = await self.fetch_statistics(part_slug)
-                prices = [s.get('median') or s.get('avg_price') for s in stats.get('48hours', []) if s.get('median') or s.get('avg_price')]
-                # Enforce minimum sample size from 48h stats as a proxy for available pricing points
-                if len(prices) < PRICE_SAMPLE_SIZE:
-                    return (part_slug, None)
-                p = float(np.median(prices)) if prices else None
-                return (part_slug, p)
-            except Exception:
-                return (part_slug, None)
+            p = await self.get_price_from_orders(part_slug)
+            return (part_slug, p)
 
         tasks = [asyncio.create_task(price_part(slug, qty)) for slug, qty in set_data.parts.items()]
         results = await asyncio.gather(*tasks)
@@ -492,12 +480,10 @@ class SetProfitAnalyzer:
             part_prices[part_slug] = p
             total_part_cost += p * qty
 
-        # Skip sets with missing part prices
         if missing_parts:
             logger.warning(f"Skipping set {set_data.name} due to missing prices for parts: {missing_parts}")
             return None
 
-        # Calculate profit
         profit = set_price - total_part_cost
         profit_margin = 0 if total_part_cost == 0 else profit / total_part_cost
 
@@ -511,27 +497,58 @@ class SetProfitAnalyzer:
 
     async def fetch_volume_data(self, set_slug: str) -> VolumeData:
         """
-        Fetch 48-hour volume data for a set
-
-        Args:
-            set_slug: Slug identifier for the set
-
-        Returns:
-            VolumeData object with volume information
+        Fetch 48-hour volume data for a set, using a 1-hour cache.
         """
         logger.info(f"Fetching volume data for set: {set_slug}")
 
-        # No on-disk caching to avoid many small files
+        # Check cache first
+        try:
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            # Ensure table exists
+            cur.execute("CREATE TABLE IF NOT EXISTS volume_cache (item_slug TEXT PRIMARY KEY, volume_48h INTEGER, last_updated TEXT)")
+            cur.execute("SELECT volume_48h, last_updated FROM volume_cache WHERE item_slug = ?", (set_slug,))
+            cached_result = cur.fetchone()
+            conn.close()
 
-        # Use the statistics endpoint to get volume data
+            if cached_result:
+                volume_48h, last_updated_str = cached_result
+                last_updated = datetime.fromisoformat(last_updated_str)
+                if (datetime.utcnow() - last_updated).total_seconds() < 3600:  # 1 hour
+                    logger.info(f"Using cached volume for {set_slug}")
+                    return VolumeData(volume_48h=volume_48h)
+        except Exception as e:
+            logger.error(f"Failed to read from volume cache: {e}")
+
+        # If not in cache or expired, fetch from API
+        logger.info(f"Fetching fresh volume data for {set_slug}")
         data = await self.api.get(f"/items/{set_slug}/statistics")
 
         volume_48h = 0
+        latest_timestamp = None
 
         if data and 'payload' in data and 'statistics_closed' in data['payload'] and '48hours' in data['payload']['statistics_closed']:
-            # Extract volume from 48-hour statistics
-            for stat in data['payload']['statistics_closed']['48hours']:
+            stats_48h = data['payload']['statistics_closed']['48hours']
+            for stat in stats_48h:
                 volume_48h += stat.get('volume', 0)
+            if stats_48h:
+                # Get the timestamp of the last entry in the 48h statistics
+                latest_timestamp = stats_48h[-1].get('datetime')
+
+        # Update cache
+        if latest_timestamp:
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                cur = conn.cursor()
+                cur.execute(
+                    "INSERT OR REPLACE INTO volume_cache (item_slug, volume_48h, last_updated) VALUES (?, ?, ?)",
+                    (set_slug, volume_48h, latest_timestamp)
+                )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Failed to write to volume cache: {e}")
 
         if DEBUG_MODE:
             logger.debug(f"48-hour volume for {set_slug}: {volume_48h}")
@@ -629,21 +646,21 @@ class SetProfitAnalyzer:
         """Process a single set and return its analysis result"""
         set_slug = set_item['url_name']
 
-        # Prefer pulling include.item along with orders to avoid separate item fetch
-        include_resp = await self.api.get(f"/items/{set_slug}/orders?include=item")
-        if not include_resp or 'payload' not in include_resp:
+        # Get set parts from the item endpoint
+        item_info = await self.api.get(f"/items/{set_slug}")
+        if not item_info or 'payload' not in item_info or 'item' not in item_info['payload']:
+            logger.error(f"Could not fetch item info for {set_slug}")
             return None
-        include = include_resp.get('include', {})
-        set_data = await self.extract_set_from_include(set_slug, include)
+
+        set_data = await self.extract_set_from_item_info(set_slug, item_info['payload']['item'])
         if not set_data:
             return None
 
         # Enforce minimum number of online sell orders for the set
-        online_statuses = ['ingame', 'online']
-        orders = include_resp.get('payload', {}).get('orders', [])
-        online_sell = [o for o in orders if o.get('order_type') == 'sell' and o.get('user', {}).get('status') in online_statuses]
-        if len(online_sell) < PRICE_SAMPLE_SIZE:
-            logger.info(f"Skipping {set_slug}: only {len(online_sell)} online sell orders (< {PRICE_SAMPLE_SIZE})")
+        set_orders = await self.fetch_orders(set_slug)
+        online_sell_orders = [o for o in set_orders if o['order_type'] == 'sell']
+        if len(online_sell_orders) < PRICE_SAMPLE_SIZE:
+            logger.info(f"Skipping {set_slug}: only {len(online_sell_orders)} online sell orders (< {PRICE_SAMPLE_SIZE})")
             return None
 
         # Calculate profit
@@ -672,8 +689,8 @@ class SetProfitAnalyzer:
         # Fetch all items
         items = await self.fetch_all_items()
 
-        # Filter to only include sets (url_name ends with '_set')
-        set_items = [item for item in items if item.get('url_name', '').endswith('_set')]
+        # Filter to only include prime sets (url_name ends with '_prime_set')
+        set_items = [item for item in items if item.get('url_name', '').endswith('_prime_set')]
         logger.info(f"Found {len(set_items)} sets to analyze")
 
         tasks = [asyncio.create_task(self.process_set(item)) for item in set_items]
@@ -686,19 +703,28 @@ class SetProfitAnalyzer:
                 self.on_progress(processed, total)
             except Exception:
                 pass
-        for future in tqdm(asyncio.as_completed(tasks), total=total, desc="Analyzing sets"):
-            if self.cancel_token.get("stop"):
-                logger.info("Cancellation requested. Stopping analysis loop.")
-                break
-            result = await future
-            if result:
-                results.append(result)
-            processed += 1
-            if self.on_progress:
-                try:
-                    self.on_progress(processed, total)
-                except Exception:
-                    pass
+        try:
+            for future in tqdm(asyncio.as_completed(tasks), total=total, desc="Analyzing sets"):
+                if self.cancel_token.get("stop"):
+                    logger.info("Cancellation requested. Stopping analysis loop.")
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
+                    break
+                result = await future
+                if result:
+                    results.append(result)
+                processed += 1
+                if self.on_progress:
+                    try:
+                        self.on_progress(processed, total)
+                    except Exception:
+                        pass
+        except asyncio.CancelledError:
+            logger.warning("Analysis was cancelled.")
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
 
         # Normalize data and calculate scores
         results = self.normalize_data(results)
@@ -713,7 +739,6 @@ class SetProfitAnalyzer:
         """Save results to CSV or XLSX file based on configuration"""
         # Persist results to SQLite for cumulative analytics instead of CSV/JSON outputs
         try:
-            import sqlite3
             os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
             conn = sqlite3.connect(DB_PATH)
             cur = conn.cursor()
@@ -732,6 +757,16 @@ class SetProfitAnalyzer:
                     part_cost_total REAL,
                     volume_48h INTEGER,
                     score REAL
+                )
+                """
+            )
+            # New table for volume cache
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS volume_cache (
+                    item_slug TEXT PRIMARY KEY,
+                    volume_48h INTEGER,
+                    last_updated TEXT
                 )
                 """
             )

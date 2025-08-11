@@ -6,7 +6,9 @@ import plotly.graph_objects as go
 from wf_market_analyzer import run_analysis_ui
 from config import DB_PATH
 import sqlite3
-from datetime import datetime
+import time
+import sys
+from datetime import datetime, timedelta
 from sklearn.linear_model import LinearRegression
 import numpy as np
 
@@ -55,6 +57,41 @@ st.markdown('''
 
 st.title("💠 Warframe Market Profit Analyzer")
 st.markdown("<h4>Analyze sets and uncover profits interactively!</h4>", unsafe_allow_html=True)
+
+def get_last_volume_update_time():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        # Check if the table exists
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='volume_cache'")
+        if cur.fetchone() is None:
+            conn.close()
+            return None
+        cur.execute("SELECT MAX(last_updated) FROM volume_cache")
+        result = cur.fetchone()
+        conn.close()
+        if result and result[0]:
+            return datetime.fromisoformat(result[0])
+        return None
+    except Exception as e:
+        # st.warning(f"Could not read volume cache timestamp: {e}")
+        return None
+
+volume_update_placeholder = st.empty()
+last_update = get_last_volume_update_time()
+
+if last_update:
+    next_update_time = last_update + timedelta(hours=1)
+    now_utc = datetime.now(last_update.tzinfo)
+
+    if now_utc < next_update_time:
+        remaining = next_update_time - now_utc
+        minutes, seconds = divmod(int(remaining.total_seconds()), 60)
+        volume_update_placeholder.info(f"New volume data available in {minutes}m {seconds}s.")
+    else:
+        volume_update_placeholder.warning("OLD VOLUME DATA. You should run analysis.")
+else:
+    volume_update_placeholder.info("Run analysis to get initial volume data.")
 
 # Sidebar config
 def sidebar_config():
@@ -113,19 +150,29 @@ with col_toggle:
 if stop_btn:
     # Signal stop by setting a flag in session
     st.session_state['cancel'] = True
-    st.info("Stopping after current in-flight tasks...")
+    st.info("Stop signal sent. Terminating analysis...")
 
 if quit_btn:
     st.session_state['cancel'] = True
-    st.success("Quitting...")
-    # Streamlit 1.32+: use st.query_params to avoid deprecation warning
-    try:
-        st.query_params.update({"app_shutdown": "1"})
-    except Exception:
-        pass
-    # Force terminate the script
-    import os, sys
-    os._exit(0)
+    placeholder = st.empty()
+    lottie_closing = load_lottieurl("https://assets5.lottiefiles.com/packages/lf20_vsiyhsha.json")
+    if lottie_closing:
+        with placeholder:
+            st_lottie(lottie_closing, height=120, key="closing")
+
+    for i in range(3, 0, -1):
+        st.success(f"Closing in {i}...")
+        time.sleep(1)
+
+    # Try to close browser tab
+    st.markdown("<script>window.close();</script>", unsafe_allow_html=True)
+    time.sleep(1) # Give it a moment
+    # Exit script
+    sys.exit()
+
+if st.session_state.get('run_analysis_on_rerun', False):
+    st.session_state['run_analysis_on_rerun'] = False
+    run_btn = True # Trigger the analysis
 
 if run_btn:
     st.session_state['data'] = None
@@ -273,27 +320,22 @@ if st.session_state['data'] is not None:
         st.info("24/7 Mode appends data every interval so regression improves over time. Adjust weights or toggles in the sidebar and rerun analysis.")
 
     # 24/7 Mode: display status and schedule next run
-    if st.session_state['continuous']:
+    if st.session_state.get('continuous', False):
         st.markdown("---")
         st.subheader("24/7 Mode Status")
-        last = st.session_state['last_run'] or "Never"
+        last = st.session_state.get('last_run', "Never")
         st.markdown(f"Last run (UTC): {last}")
-        st.markdown(f"Interval: {int(st.session_state['interval_minutes'])} minutes")
-        # Use Streamlit autorefresh to trigger runs
-        # Note: The rerun will re-enter the page and the user can click Run Analysis once; for true unattended
-        # operation, we trigger programmatic runs as well
-        import time
-        from streamlit.runtime.scriptrunner import add_script_run_ctx
-        # Programmatic auto-run when interval has elapsed
-        try:
-            if st.session_state['last_run']:
+        st.markdown(f"Interval: {int(st.session_state.get('interval_minutes', 60))} minutes")
+
+        if st.session_state.get('last_run'):
+            try:
                 last_ts = datetime.fromisoformat(st.session_state['last_run'])
                 elapsed_min = (datetime.utcnow() - last_ts).total_seconds() / 60.0
-                if elapsed_min >= float(st.session_state['interval_minutes']):
-                    # Trigger a run automatically
+                if elapsed_min >= int(st.session_state.get('interval_minutes', 60)):
+                    st.session_state['run_analysis_on_rerun'] = True
                     st.experimental_rerun()
-        except Exception:
-            pass
+            except Exception as e:
+                st.error(f"Error in 24/7 mode scheduler: {e}")
 
 st.markdown("""
 ---
