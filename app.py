@@ -57,49 +57,29 @@ st.title("💠 Warframe Market Profit Analyzer")
 st.markdown("<h4>Analyze sets and uncover profits interactively!</h4>", unsafe_allow_html=True)
 
 # Sidebar config
-@st.cache_data(show_spinner=False)
-def _static_constants():
-    # Placeholder for any heavy static lookups (e.g., item lists) if needed
-    return {"version": "1.0"}
-
-
 def sidebar_config():
     st.sidebar.header("Configuration")
-    platform = st.sidebar.selectbox("Platform", options=["pc", "xbox", "ps4", "switch"], index=0)
+    # Platform is fixed to 'pc' via headers; hiding from UI to reduce confusion
     profit_weight = st.sidebar.slider("Profit Weight", 0.0, 3.0, 1.0, 0.1)
     volume_weight = st.sidebar.slider("Volume Weight", 0.0, 3.0, 1.2, 0.1)
     profit_margin_weight = st.sidebar.slider("Profit Margin Weight", 0.0, 3.0, 0.0, 0.1)
-    robust_score = st.sidebar.checkbox("Robust score (rank-based)", True)
-    conservative_pricing = st.sidebar.checkbox("Conservative pricing (P25 sell / P75 buy)", True)
     price_sample_size = st.sidebar.slider("Minimum Online Sell Orders (Sample Size)", 1, 10, 2, 1,
                                           help="Minimum number of online sell orders required to include a set/part")
-    min_profit = st.sidebar.number_input("Min profit", value=0.0, step=1.0)
-    min_margin = st.sidebar.number_input("Min margin", value=0.0, step=0.01)
-    min_volume = st.sidebar.number_input("Min 48h volume", value=1.0, step=1.0)
     # Removed median pricing and statistics toggle – statistics is always used
-    analyze_trends = st.sidebar.checkbox("Analyze trends", False)
-    trend_days = st.sidebar.slider("Trend days", 7, 60, 30, 1)
-    trade_tax_percent = st.sidebar.number_input("Trade tax %", value=0.0, min_value=0.0, max_value=50.0, step=0.5)
-    retention_days = st.sidebar.number_input("Retention (days)", value=90, min_value=7, max_value=365, step=1)
+    analyze_trends = False
+    trend_days = 30
     debug = st.sidebar.checkbox("Debug Mode", False)
     # Explicitly cast all values to correct types
     return dict(
-        platform=str(platform),
+        platform='pc',
         profit_weight=float(profit_weight),
         volume_weight=float(volume_weight),
         profit_margin_weight=float(profit_margin_weight),
-        robust_score=bool(robust_score),
-        conservative_pricing=bool(conservative_pricing),
         price_sample_size=int(price_sample_size),
         use_median_pricing=False,
         use_statistics_for_pricing=True,
         analyze_trends=bool(analyze_trends),
         trend_days=int(trend_days),
-        trade_tax_percent=float(trade_tax_percent),
-        min_profit=float(min_profit),
-        min_margin=float(min_margin),
-        min_volume=float(min_volume),
-        retention_days=int(retention_days),
         debug=bool(debug),
     )
 
@@ -112,9 +92,6 @@ if 'data' not in st.session_state:
     st.session_state['continuous'] = False
     st.session_state['interval_minutes'] = 60
     st.session_state['last_run'] = None
-    st.session_state['autorun_pending'] = False
-    st.session_state['run_in_progress'] = False
-    st.session_state['cancel_token'] = {'stop': False}
 
 st.markdown("""
 Run a full market analysis and get a ranked table of profitable sets. 
@@ -135,46 +112,25 @@ with col_toggle:
 
 if stop_btn:
     # Signal stop by setting a flag in session
-    if 'cancel_token' not in st.session_state:
-        st.session_state['cancel_token'] = {'stop': False}
-    st.session_state['cancel_token']['stop'] = True
+    st.session_state['cancel'] = True
     st.info("Stopping after current in-flight tasks...")
 
 if quit_btn:
-    st.session_state['cancel_token']['stop'] = True
+    st.session_state['cancel'] = True
     st.success("Quitting...")
     # Streamlit 1.32+: use st.query_params to avoid deprecation warning
     try:
         st.query_params.update({"app_shutdown": "1"})
     except Exception:
         pass
-    # Politely stop Streamlit script
-    import sys
-    raise SystemExit
+    # Force terminate the script
+    import os, sys
+    os._exit(0)
 
-# 24/7 autorun check at top of app execution
-try:
-    # Reset stuck in-progress after long timeout (10 minutes)
-    if st.session_state.get('run_in_progress') and st.session_state.get('last_run'):
-        last_ts = datetime.fromisoformat(st.session_state['last_run'])
-        if (datetime.utcnow() - last_ts).total_seconds() > 600:
-            st.session_state['run_in_progress'] = False
-    if st.session_state.get('continuous'):
-        last = st.session_state.get('last_run')
-        if last:
-            elapsed_min = (datetime.utcnow() - datetime.fromisoformat(last)).total_seconds() / 60.0
-            if elapsed_min >= float(st.session_state.get('interval_minutes', 60)):
-                st.session_state['autorun_pending'] = True
-        else:
-            st.session_state['autorun_pending'] = True
-except Exception:
-    pass
-
-def _run_analysis_now():
+if run_btn:
     st.session_state['data'] = None
     st.session_state['results'] = None
-    st.session_state['cancel_token']['stop'] = False
-    st.session_state['run_in_progress'] = True
+    st.session_state['cancel'] = False
     # Progress UI: live counter + ETA + progress bar
     progress_placeholder = st.empty()
     bar = st.progress(0, text="Preparing...")
@@ -198,6 +154,7 @@ def _run_analysis_now():
         if st_lottie and lottie_loading:
             st_lottie(lottie_loading, height=120, key="loading")
         try:
+            # Explicitly cast all config values to correct types for run_analysis_ui
             df, results = run_analysis_ui(
                 platform=str(config['platform']),
                 profit_weight=float(config['profit_weight']),
@@ -206,56 +163,25 @@ def _run_analysis_now():
                 price_sample_size=int(config['price_sample_size']),
                 use_median_pricing=bool(config['use_median_pricing']),
                 use_statistics_for_pricing=bool(config.get('use_statistics_for_pricing', False)),
-                conservative_pricing=bool(config.get('conservative_pricing', True)),
-                robust_score=bool(config.get('robust_score', True)),
                 analyze_trends=bool(config['analyze_trends']),
                 trend_days=int(config['trend_days']),
-                trade_tax_percent=float(config.get('trade_tax_percent', 0.0)),
-                min_profit_threshold=float(config.get('min_profit', 0.0)),
-                min_margin_threshold=float(config.get('min_margin', 0.0)),
-                min_volume_threshold=float(config.get('min_volume', 0.0)),
                 debug=bool(config['debug']),
                 persist=True,
                 progress_callback=on_progress,
-                cancel_token=st.session_state['cancel_token']
+                cancel_token={"stop": st.session_state.get('cancel', False)}
             )
-            # Apply pre-normalization filters on the DataFrame for display
-            if df is not None and len(df) > 0:
-                df = df[(df['Profit'] > float(config['min_profit'])) &
-                        (df['Profit Margin'] > float(config['min_margin'])) &
-                        (df['Volume (48h)'] >= float(config['min_volume']))]
             st.session_state['data'] = df
             st.session_state['results'] = results
             st.session_state['last_run'] = datetime.utcnow().isoformat()
-            st.session_state['autorun_pending'] = False
-            st.session_state['run_in_progress'] = False
             st.success("Analysis complete! 🎉")
             st.balloons()
         except Exception as e:
-            st.session_state['run_in_progress'] = False
             st.error(f"API fetch failed – try again!\n{e}")
 
-
-if run_btn:
-    _run_analysis_now()
-
-# Auto-run trigger
-if st.session_state.get('autorun_pending') and not st.session_state.get('run_in_progress'):
-    st.session_state['autorun_pending'] = False
-    _run_analysis_now()
-    st.rerun()
 if st.session_state['data'] is not None:
     df = st.session_state['data']
     st.subheader("Results Table")
     st.dataframe(df, use_container_width=True, hide_index=True)
-
-    # Download CSV
-    try:
-        csv_bytes = df.to_csv(index=False).encode('utf-8') if df is not None else None
-        if csv_bytes:
-            st.download_button("Download CSV", csv_bytes, file_name="set_profit_analysis.csv", mime="text/csv")
-    except Exception:
-        pass
 
     if len(df) == 0:
         st.warning("No results to display. Try adjusting filters/weights and rerun.")
@@ -281,47 +207,8 @@ if st.session_state['data'] is not None:
                 st.markdown(f"**Set Selling Price:** {top['Set Selling Price']}")
                 st.markdown(f"**Part Costs Total:** {top['Part Costs Total']}")
                 st.markdown(f"**Volume (48h):** {top['Volume (48h)']}")
-                if 'ETA (hours)' in top:
-                    st.markdown(f"**ETA (hours):** {top['ETA (hours)']}")
-                if 'Profit/Day' in top:
-                    st.markdown(f"**Profit/Day:** {top['Profit/Day']}")
-                trend_col = f"Trend % ({int(config['trend_days'])}d)"
-                if trend_col in df.columns:
-                    st.markdown(f"**{trend_col}:** {top[trend_col]}")
                 st.markdown(f"**Score:** {top['Score']}")
                 st.markdown(f"**Part Prices:** {top['Part Prices']}")
-                # External link
-                import urllib.parse
-                slug = top.get('Set Slug') if 'Set Slug' in df.columns else None
-                if slug:
-                    st.markdown(f"[Open on warframe.market](https://warframe.market/items/{urllib.parse.quote(slug)})")
-
-                # Sparkline for price/volume trend (cached)
-                import requests
-                @st.cache_data(show_spinner=False)
-                def fetch_series(set_slug: str, days: int, platform: str):
-                    headers = {"Platform": platform, "Language": "en", "Accept": "application/json"}
-                    url = f"https://api.warframe.market/v1/items/{set_slug}/statistics"
-                    r = requests.get(url, headers=headers, timeout=30)
-                    r.raise_for_status()
-                    data = r.json()
-                    stats = data.get('payload', {}).get('statistics_closed', {}).get('90days', [])
-                    stats = stats[-int(days):]
-                    dates = [s.get('datetime') for s in stats]
-                    vols = [s.get('volume', 0) for s in stats]
-                    meds = [s.get('median') or s.get('avg_price') for s in stats]
-                    return dates, vols, meds
-
-                try:
-                    dates, vols, meds = fetch_series(slug, int(config['trend_days']), str(config['platform']))
-                    if dates and vols:
-                        import plotly.graph_objs as go
-                        spark = go.Figure()
-                        spark.add_trace(go.Scatter(x=dates, y=vols, mode='lines', name='Volume', line=dict(color='#8f94fb')))
-                        spark.update_layout(height=200, margin=dict(l=10, r=10, t=10, b=10), showlegend=False)
-                        st.plotly_chart(spark, use_container_width=True)
-                except Exception:
-                    pass
             except Exception:
                 st.info("No top set details available.")
 
@@ -333,7 +220,7 @@ if st.session_state['data'] is not None:
         def load_cumulative_df():
             try:
                 conn = sqlite3.connect(DB_PATH)
-                query = "SELECT r.ts_utc as run_ts, r.platform, sm.set_slug, sm.set_name, sm.profit, sm.profit_margin, sm.set_price, sm.part_cost_total, sm.volume_48h, sm.score FROM set_metrics sm JOIN runs r ON sm.run_id = r.run_id"
+                query = "SELECT run_ts, platform, set_slug, set_name, profit, profit_margin, set_price, part_cost_total, volume_48h, score FROM set_results"
                 hist_df = pd.read_sql_query(query, conn)
                 conn.close()
                 return hist_df
@@ -392,32 +279,19 @@ if st.session_state['data'] is not None:
         last = st.session_state['last_run'] or "Never"
         st.markdown(f"Last run (UTC): {last}")
         st.markdown(f"Interval: {int(st.session_state['interval_minutes'])} minutes")
-        # Retention cleanup
+        # Use Streamlit autorefresh to trigger runs
+        # Note: The rerun will re-enter the page and the user can click Run Analysis once; for true unattended
+        # operation, we trigger programmatic runs as well
+        import time
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        # Programmatic auto-run when interval has elapsed
         try:
-            conn = sqlite3.connect(DB_PATH)
-            cur = conn.cursor()
-            cur.execute("PRAGMA journal_mode=WAL;")
-            cur.execute("PRAGMA synchronous=NORMAL;")
-            cur.execute("PRAGMA foreign_keys=ON;")
-            # Drop runs older than retention_days
-            cur.execute("SELECT run_id, ts_utc FROM runs")
-            rows = cur.fetchall()
-            to_delete = []
-            from datetime import timedelta
-            cutoff = datetime.utcnow() - timedelta(days=int(config.get('retention_days', 90)))
-            for rid, ts_s in rows:
-                try:
-                    ts = datetime.fromisoformat(ts_s)
-                    if ts < cutoff:
-                        to_delete.append(rid)
-                except Exception:
-                    continue
-            if to_delete:
-                cur.execute("BEGIN;")
-                cur.executemany("DELETE FROM set_metrics WHERE run_id = ?", [(rid,) for rid in to_delete])
-                cur.executemany("DELETE FROM runs WHERE run_id = ?", [(rid,) for rid in to_delete])
-                conn.commit()
-            conn.close()
+            if st.session_state['last_run']:
+                last_ts = datetime.fromisoformat(st.session_state['last_run'])
+                elapsed_min = (datetime.utcnow() - last_ts).total_seconds() / 60.0
+                if elapsed_min >= float(st.session_state['interval_minutes']):
+                    # Trigger a run automatically
+                    st.experimental_rerun()
         except Exception:
             pass
 

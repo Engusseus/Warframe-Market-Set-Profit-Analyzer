@@ -2,20 +2,18 @@
 
 # API Settings
 API_BASE_URL = 'https://api.warframe.market/v1'  # Base URL must include /v1
-REQUESTS_PER_SECOND = 3  # Average budget; burst handled by token-bucket
-USER_AGENT = 'WarframeSetAnalyzer/1.0 (+https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer)'
+REQUESTS_PER_SECOND = 5  # Faster default; exponential backoff still handles 429/5xx
 HEADERS = {
     'Platform': 'pc',
     'Language': 'en',
-    'Accept': 'application/json',  # 'Crossplay' header removed per v1 API
-    'User-Agent': USER_AGENT,
+    'Accept': 'application/json'  # 'Crossplay' header removed per v1 API
 }
 
 # Output Settings
 OUTPUT_FILE = 'set_profit_analysis.csv'
 # Choose 'csv' or 'xlsx'
 OUTPUT_FORMAT = 'csv'  # 'csv' or 'xlsx'
-DEBUG_MODE = False  # Gate verbose logs behind this
+DEBUG_MODE = True  # Enable detailed logging
 
 # Scoring Settings
 PROFIT_WEIGHT = 1.0
@@ -29,9 +27,6 @@ USE_MEDIAN_PRICING = False  # Deprecated in UI
 
 # Always use aggregated statistics endpoint for pricing instead of raw orders (faster, smaller payloads)
 USE_STATISTICS_FOR_PRICING = True
-
-# Concurrency
-CONCURRENCY_LIMIT = 10  # Max concurrent HTTP requests
 
 
 # Directory where cached API responses are stored
