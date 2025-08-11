@@ -155,6 +155,10 @@ with col_toggle:
             "Interval (minutes)", min_value=5, max_value=240, value=60, step=5
         )
 
+if st.session_state.get('run_analysis_on_rerun', False):
+    st.session_state['run_analysis_on_rerun'] = False
+    run_btn = True
+
 if run_btn and st.session_state.analysis_process is None:
     st.session_state.result_queue = Queue()
     # Note: cancel_token is no longer used with multiprocessing
@@ -167,7 +171,6 @@ if run_btn and st.session_state.analysis_process is None:
     )
     st.session_state.analysis_process.start()
     st.info("Analysis started in a separate process.")
-    st.rerun()
 
 if stop_btn and st.session_state.analysis_process is not None:
     st.session_state.analysis_process.terminate()
@@ -175,7 +178,6 @@ if stop_btn and st.session_state.analysis_process is not None:
     st.session_state.analysis_process = None
     st.session_state.result_queue = None
     st.info("Analysis process terminated.")
-    st.rerun()
 
 if quit_btn:
     if st.session_state.analysis_process is not None:
@@ -207,7 +209,6 @@ if st.session_state.analysis_process:
             st.session_state['last_run'] = datetime.utcnow().isoformat()
             st.success("Analysis complete! 🎉")
             st.balloons()
-        st.rerun()
 
 if st.session_state['data'] is not None:
     df = st.session_state['data']
@@ -317,7 +318,6 @@ if st.session_state['data'] is not None:
                 elapsed_min = (datetime.utcnow() - last_ts).total_seconds() / 60.0
                 if elapsed_min >= int(st.session_state.get('interval_minutes', 60)):
                     st.session_state['run_analysis_on_rerun'] = True
-                    st.rerun()
             except Exception as e:
                 st.error(f"Error in 24/7 mode scheduler: {e}")
 
