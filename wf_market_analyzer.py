@@ -165,6 +165,7 @@ class WarframeMarketAPI:
             try:
                 if DEBUG_MODE:
                     logger.debug(f"Making request to: {url}")
+                    logger.debug(f"Request headers: {self.session.headers}")
 
                 async with self.session.get(url) as response:
                     if response.status == 200:
@@ -176,7 +177,7 @@ class WarframeMarketAPI:
 
                         # Handle specific error codes
                         if response.status == 429:  # Rate limited
-                            wait_time = backoff * 10  # Longer backoff for rate limiting
+                            wait_time = backoff * 30  # Increased backoff
                             logger.warning(f"Rate limited! Waiting {wait_time} seconds")
                             await asyncio.sleep(wait_time)
                             backoff *= 2  # Exponential backoff
@@ -469,8 +470,10 @@ class SetProfitAnalyzer:
             p = await self.get_price_from_orders(part_slug)
             return (part_slug, p)
 
-        tasks = [asyncio.create_task(price_part(slug, qty)) for slug, qty in set_data.parts.items()]
-        results = await asyncio.gather(*tasks)
+        results = []
+        for slug, qty in set_data.parts.items():
+            result = await price_part(slug, qty)
+            results.append(result)
         for part_slug, p in results:
             qty = set_data.parts[part_slug]
             if p is None:
@@ -947,6 +950,17 @@ async def main(args: argparse.Namespace) -> None:
         logger.error(f"Error in main execution: {str(e)}", exc_info=True)
     finally:
         await analyzer.close()
+
+
+def run_analysis_in_process(queue, **kwargs):
+    """
+    Wrapper to run the analysis in a separate process and put the result in a queue.
+    """
+    try:
+        df, results = run_analysis_ui(**kwargs)
+        queue.put((df, results))
+    except Exception as e:
+        queue.put(e)
 
 
 if __name__ == "__main__":

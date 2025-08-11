@@ -3,10 +3,16 @@
 # API Settings
 API_BASE_URL = 'https://api.warframe.market/v1'  # Base URL must include /v1
 REQUESTS_PER_SECOND = 3  # Slower default to comply with API ToS; exponential backoff still handles 429/5xx
+USER_AGENT = (
+    "Warframe-Market-Set-Profit-Analyzer/1.0 "
+    "(github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer; "
+    "testing; high-rate requests will be stopped ASAP)"
+)
 HEADERS = {
     'Platform': 'pc',
     'Language': 'en',
-    'Accept': 'application/json'  # 'Crossplay' header removed per v1 API
+    'Accept': 'application/json',
+    'User-Agent': USER_AGENT,
 }
 
 # Output Settings

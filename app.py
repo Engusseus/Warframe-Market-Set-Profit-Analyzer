@@ -3,12 +3,14 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from wf_market_analyzer import run_analysis_ui
+from wf_market_analyzer import run_analysis_ui, run_analysis_in_process
 from config import DB_PATH
 import sqlite3
 import time
 import sys
+from multiprocessing import Process, Queue
 from datetime import datetime, timedelta
+from streamlit_autorefresh import st_autorefresh
 from sklearn.linear_model import LinearRegression
 import numpy as np
 
@@ -85,6 +87,7 @@ if last_update:
     now_utc = datetime.now(last_update.tzinfo)
 
     if now_utc < next_update_time:
+        st_autorefresh(interval=1000, limit=None, key="volume_countdown_refresh")
         remaining = next_update_time - now_utc
         minutes, seconds = divmod(int(remaining.total_seconds()), 60)
         volume_update_placeholder.info(f"New volume data available in {minutes}m {seconds}s.")
@@ -135,25 +138,50 @@ Run a full market analysis and get a ranked table of profitable sets.
 Click below to start! 🚀
 """)
 
+if 'analysis_process' not in st.session_state:
+    st.session_state.analysis_process = None
+    st.session_state.result_queue = None
+
 col_run, col_toggle = st.columns([2, 2])
 with col_run:
     run_btn = st.button("Run Analysis", type="primary")
     stop_btn = st.button("Stop")
     quit_btn = st.button("Quit")
+
 with col_toggle:
     st.checkbox("24/7 Mode", key='continuous', help="Continuously fetch and append data.")
-    if st.session_state['continuous']:
+    if st.session_state.get('continuous', False):
         st.session_state['interval_minutes'] = st.number_input(
             "Interval (minutes)", min_value=5, max_value=240, value=60, step=5
         )
 
-if stop_btn:
-    # Signal stop by setting a flag in session
-    st.session_state['cancel'] = True
-    st.info("Stop signal sent. Terminating analysis...")
+if run_btn and st.session_state.analysis_process is None:
+    st.session_state.result_queue = Queue()
+    # Note: cancel_token is no longer used with multiprocessing
+    config_for_process = config.copy()
+
+    st.session_state.analysis_process = Process(
+        target=run_analysis_in_process,
+        args=(st.session_state.result_queue,),
+        kwargs=config_for_process
+    )
+    st.session_state.analysis_process.start()
+    st.info("Analysis started in a separate process.")
+    st.experimental_rerun()
+
+if stop_btn and st.session_state.analysis_process is not None:
+    st.session_state.analysis_process.terminate()
+    st.session_state.analysis_process.join() # Wait for termination
+    st.session_state.analysis_process = None
+    st.session_state.result_queue = None
+    st.info("Analysis process terminated.")
+    st.experimental_rerun()
 
 if quit_btn:
-    st.session_state['cancel'] = True
+    if st.session_state.analysis_process is not None:
+        st.session_state.analysis_process.terminate()
+        st.session_state.analysis_process.join()
+
     placeholder = st.empty()
     lottie_closing = load_lottieurl("https://assets5.lottiefiles.com/packages/lf20_vsiyhsha.json")
     if lottie_closing:
@@ -164,66 +192,31 @@ if quit_btn:
         st.success(f"Closing in {i}...")
         time.sleep(1)
 
-    # Try to close browser tab
     st.markdown("<script>window.close();</script>", unsafe_allow_html=True)
-    time.sleep(1) # Give it a moment
-    # Exit script
+    time.sleep(1)
     sys.exit()
 
-if st.session_state.get('run_analysis_on_rerun', False):
-    st.session_state['run_analysis_on_rerun'] = False
-    run_btn = True # Trigger the analysis
-
-if run_btn:
-    st.session_state['data'] = None
-    st.session_state['results'] = None
-    st.session_state['cancel'] = False
-    # Progress UI: live counter + ETA + progress bar
-    progress_placeholder = st.empty()
-    bar = st.progress(0, text="Preparing...")
-    counter = st.empty()
-    eta = st.empty()
-    start_ts = datetime.utcnow()
-
-    def on_progress(processed: int, total: int):
-        pct = int((processed / total) * 100) if total else 0
-        bar.progress(min(pct, 100), text=f"Analyzing sets... {pct}%")
-        counter.markdown(f"Processed {processed} of {total} sets")
-        if processed > 0:
-            elapsed = (datetime.utcnow() - start_ts).total_seconds()
-            rate = processed / max(elapsed, 1e-6)
-            remaining = (total - processed) / max(rate, 1e-6)
-            eta.markdown(f"ETA: ~{int(remaining)}s")
-        else:
-            eta.markdown("ETA: estimating...")
-
-    with st.spinner("Fetching and analyzing sets... this may take a minute!"):
+if st.session_state.analysis_process:
+    if st.session_state.analysis_process.is_alive():
+        st.info("Analysis is running in the background...")
         if st_lottie and lottie_loading:
-            st_lottie(lottie_loading, height=120, key="loading")
-        try:
-            # Explicitly cast all config values to correct types for run_analysis_ui
-            df, results = run_analysis_ui(
-                platform=str(config['platform']),
-                profit_weight=float(config['profit_weight']),
-                volume_weight=float(config['volume_weight']),
-                profit_margin_weight=float(config['profit_margin_weight']),
-                price_sample_size=int(config['price_sample_size']),
-                use_median_pricing=bool(config['use_median_pricing']),
-                use_statistics_for_pricing=bool(config.get('use_statistics_for_pricing', False)),
-                analyze_trends=bool(config['analyze_trends']),
-                trend_days=int(config['trend_days']),
-                debug=bool(config['debug']),
-                persist=True,
-                progress_callback=on_progress,
-                cancel_token={"stop": st.session_state.get('cancel', False)}
-            )
+            st_lottie(lottie_loading, height=120, key="loading_process")
+    else:
+        st.session_state.analysis_process.join() # Ensure process has finished
+        result = st.session_state.result_queue.get()
+        st.session_state.analysis_process = None
+        st.session_state.result_queue = None
+
+        if isinstance(result, Exception):
+            st.error(f"Analysis failed: {result}")
+        else:
+            df, results = result
             st.session_state['data'] = df
             st.session_state['results'] = results
             st.session_state['last_run'] = datetime.utcnow().isoformat()
             st.success("Analysis complete! 🎉")
             st.balloons()
-        except Exception as e:
-            st.error(f"API fetch failed – try again!\n{e}")
+        st.experimental_rerun()
 
 if st.session_state['data'] is not None:
     df = st.session_state['data']

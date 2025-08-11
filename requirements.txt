@@ -10,3 +10,4 @@ plotly>=5.0.0
 scikit-learn>=1.0.0
 streamlit-lottie>=0.0.5
 requests>=2.25.0
+streamlit-autorefresh>=1.0.1
