@@ -167,7 +167,7 @@ if run_btn and st.session_state.analysis_process is None:
     )
     st.session_state.analysis_process.start()
     st.info("Analysis started in a separate process.")
-    st.experimental_rerun()
+    st.rerun()
 
 if stop_btn and st.session_state.analysis_process is not None:
     st.session_state.analysis_process.terminate()
@@ -175,26 +175,17 @@ if stop_btn and st.session_state.analysis_process is not None:
     st.session_state.analysis_process = None
     st.session_state.result_queue = None
     st.info("Analysis process terminated.")
-    st.experimental_rerun()
+    st.rerun()
 
 if quit_btn:
     if st.session_state.analysis_process is not None:
         st.session_state.analysis_process.terminate()
         st.session_state.analysis_process.join()
+        st.session_state.analysis_process = None
+        st.session_state.result_queue = None
 
-    placeholder = st.empty()
-    lottie_closing = load_lottieurl("https://assets5.lottiefiles.com/packages/lf20_vsiyhsha.json")
-    if lottie_closing:
-        with placeholder:
-            st_lottie(lottie_closing, height=120, key="closing")
-
-    for i in range(3, 0, -1):
-        st.success(f"Closing in {i}...")
-        time.sleep(1)
-
-    st.markdown("<script>window.close();</script>", unsafe_allow_html=True)
-    time.sleep(1)
-    sys.exit()
+    st.success("Application has been stopped. You can now close this window.")
+    st.stop()
 
 if st.session_state.analysis_process:
     if st.session_state.analysis_process.is_alive():
@@ -216,7 +207,7 @@ if st.session_state.analysis_process:
             st.session_state['last_run'] = datetime.utcnow().isoformat()
             st.success("Analysis complete! 🎉")
             st.balloons()
-        st.experimental_rerun()
+        st.rerun()
 
 if st.session_state['data'] is not None:
     df = st.session_state['data']
@@ -326,7 +317,7 @@ if st.session_state['data'] is not None:
                 elapsed_min = (datetime.utcnow() - last_ts).total_seconds() / 60.0
                 if elapsed_min >= int(st.session_state.get('interval_minutes', 60)):
                     st.session_state['run_analysis_on_rerun'] = True
-                    st.experimental_rerun()
+                    st.rerun()
             except Exception as e:
                 st.error(f"Error in 24/7 mode scheduler: {e}")
 

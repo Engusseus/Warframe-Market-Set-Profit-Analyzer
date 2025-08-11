@@ -177,7 +177,7 @@ class WarframeMarketAPI:
 
                         # Handle specific error codes
                         if response.status == 429:  # Rate limited
-                            wait_time = backoff * 30  # Increased backoff
+                            wait_time = backoff * 60  # Increased backoff
                             logger.warning(f"Rate limited! Waiting {wait_time} seconds")
                             await asyncio.sleep(wait_time)
                             backoff *= 2  # Exponential backoff
@@ -518,7 +518,7 @@ class SetProfitAnalyzer:
             if cached_result:
                 volume_48h, last_updated_str = cached_result
                 last_updated = datetime.fromisoformat(last_updated_str)
-                if (datetime.utcnow() - last_updated).total_seconds() < 3600:  # 1 hour
+                if (datetime.now(last_updated.tzinfo) - last_updated).total_seconds() < 3600:  # 1 hour
                     logger.info(f"Using cached volume for {set_slug}")
                     return VolumeData(volume_48h=volume_48h)
         except Exception as e:
