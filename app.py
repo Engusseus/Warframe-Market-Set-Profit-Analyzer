@@ -194,9 +194,12 @@ if st.session_state.analysis_process:
         st.info("Analysis is running in the background...")
         if st_lottie and lottie_loading:
             st_lottie(lottie_loading, height=120, key="loading_process")
+        # Auto-refresh to check for process completion
+        st_autorefresh(interval=2000, limit=None, key="analysis_refresh")
     else:
         st.session_state.analysis_process.join() # Ensure process has finished
-        result = st.session_state.result_queue.get()
+        # Safely get from queue
+        result = st.session_state.result_queue.get() if not st.session_state.result_queue.empty() else None
         st.session_state.analysis_process = None
         st.session_state.result_queue = None
 

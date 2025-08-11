@@ -696,6 +696,11 @@ class SetProfitAnalyzer:
         set_items = [item for item in items if item.get('url_name', '').endswith('_prime_set')]
         logger.info(f"Found {len(set_items)} sets to analyze")
 
+        # If debug mode is on, only analyze a small sample
+        if DEBUG_MODE:
+            set_items = set_items[:10]
+            logger.info(f"DEBUG MODE: Analyzing only {len(set_items)} sets.")
+
         tasks = [asyncio.create_task(self.process_set(item)) for item in set_items]
 
         results = []
