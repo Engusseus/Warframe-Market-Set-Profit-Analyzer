@@ -539,19 +539,18 @@ class SetProfitAnalyzer:
                 # Get the timestamp of the last entry in the 48h statistics
                 latest_timestamp = stats_48h[-1].get('datetime')
 
-        # Update cache
-        if latest_timestamp:
-            try:
-                conn = sqlite3.connect(DB_PATH)
-                cur = conn.cursor()
-                cur.execute(
-                    "INSERT OR REPLACE INTO volume_cache (item_slug, volume_48h, last_updated) VALUES (?, ?, ?)",
-                    (set_slug, volume_48h, latest_timestamp)
-                )
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                logger.error(f"Failed to write to volume cache: {e}")
+        # Update cache using current timestamp to track when we fetched the data
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT OR REPLACE INTO volume_cache (item_slug, volume_48h, last_updated) VALUES (?, ?, ?)",
+                (set_slug, volume_48h, datetime.now(timezone.utc).isoformat())
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.error(f"Failed to write to volume cache: {e}")
 
         if DEBUG_MODE:
             logger.debug(f"48-hour volume for {set_slug}: {volume_48h}")

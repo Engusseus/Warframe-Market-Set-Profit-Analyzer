@@ -13,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from streamlit_autorefresh import st_autorefresh
 from sklearn.linear_model import LinearRegression
 import numpy as np
+import threading
+from streamlit.runtime.scriptrunner import add_script_run_ctx
 
 # Optional: Lottie animation
 try:
@@ -126,6 +128,15 @@ def sidebar_config():
 
 config = sidebar_config()
 
+# Initialize session state variables used across runs
+if 'analysis_process' not in st.session_state:
+    st.session_state.analysis_process = None
+    st.session_state.result_queue = None
+if 'finished_result' not in st.session_state:
+    st.session_state.finished_result = None
+if 'next_run_time' not in st.session_state:
+    st.session_state.next_run_time = None
+
 st.sidebar.subheader("24/7 Mode")
 enable_247 = st.sidebar.checkbox("Enable 24/7 Mode Controls")
 
@@ -140,10 +151,12 @@ if enable_247:
     if st.session_state.get('run_247_enabled', False):
         if st.sidebar.button("Stop 24/7 Mode"):
             st.session_state.run_247_enabled = False
+            st.session_state.next_run_time = None
             st.rerun()
     else:
         if st.sidebar.button("Start 24/7 Mode"):
             st.session_state.run_247_enabled = True
+            st.session_state.next_run_time = datetime.now(timezone.utc)
             st.rerun()
 
 if st.session_state.get('run_247_enabled', False):
@@ -160,30 +173,26 @@ if 'data' not in st.session_state:
 
 # Re-implement 24/7 mode logic
 if st.session_state.get('run_247_enabled', False):
-    st_autorefresh(interval=2000, limit=None, key="continuous_refresh")
-    if not st.session_state.analysis_process:
-        interval_minutes = st.session_state.get('continuous_interval_minutes', 60)
-        should_run = False
-        if st.session_state.get('last_run') is None:
-            should_run = True
-        else:
-            last_ts = datetime.fromisoformat(st.session_state['last_run'])
-            elapsed_seconds = (datetime.now(timezone.utc) - last_ts).total_seconds()
-            if elapsed_seconds / 60 >= interval_minutes:
-                should_run = True
-
-        if should_run:
-            st.session_state['run_analysis_on_rerun'] = True
-            st.rerun()
+    now = datetime.now(timezone.utc)
+    interval_minutes = st.session_state.get('continuous_interval_minutes', 60)
+    next_run = st.session_state.get('next_run_time')
+    if next_run is None:
+        st.session_state.next_run_time = now
+        next_run = now
+    if st.session_state.analysis_process is None and now >= next_run:
+        st.session_state['run_analysis_on_rerun'] = True
+        st.session_state.next_run_time = now + timedelta(minutes=interval_minutes)
+        st.rerun()
+    else:
+        remaining = (next_run - now).total_seconds()
+        if remaining > 0:
+            st.sidebar.info(f"Next run in {int(remaining//60)}m {int(remaining%60)}s")
+            st_autorefresh(interval=int(remaining*1000), limit=1, key="continuous_refresh")
 
 st.markdown("""
-Run a full market analysis and get a ranked table of profitable sets. 
+Run a full market analysis and get a ranked table of profitable sets.
 Click below to start! 🚀
 """)
-
-if 'analysis_process' not in st.session_state:
-    st.session_state.analysis_process = None
-    st.session_state.result_queue = None
 
 run_btn = st.button("Run Analysis", type="primary")
 stop_btn = st.button("Stop")
@@ -193,9 +202,8 @@ if st.session_state.get('run_analysis_on_rerun', False):
     st.session_state['run_analysis_on_rerun'] = False
     run_btn = True
 
-if run_btn and st.session_state.analysis_process is None:
+def launch_analysis():
     st.session_state.result_queue = Queue()
-    # Note: cancel_token is no longer used with multiprocessing
     config_for_process = config.copy()
 
     st.session_state.analysis_process = Process(
@@ -204,13 +212,27 @@ if run_btn and st.session_state.analysis_process is None:
         kwargs=config_for_process
     )
     st.session_state.analysis_process.start()
+
+    def collect_result():
+        st.session_state.analysis_process.join()
+        rq = st.session_state.result_queue
+        result = rq.get() if rq and not rq.empty() else None
+        st.session_state.finished_result = result
+        st.session_state.analysis_process = None
+        st.session_state.result_queue = None
+        st.rerun()
+
+    t = threading.Thread(target=collect_result, daemon=True)
+    add_script_run_ctx(t)
+    t.start()
     st.info("Analysis started in a separate process.")
+
+if run_btn and st.session_state.analysis_process is None:
+    launch_analysis()
 
 if stop_btn and st.session_state.analysis_process is not None:
     st.session_state.analysis_process.terminate()
-    st.session_state.analysis_process.join() # Wait for termination
-    st.session_state.analysis_process = None
-    st.session_state.result_queue = None
+    st.session_state.analysis_process.join()  # Wait for termination
     st.info("Analysis process terminated.")
 
 if quit_btn:
@@ -224,39 +246,24 @@ if quit_btn:
     st.stop()
 
 if st.session_state.analysis_process:
-    if st.session_state.analysis_process.is_alive():
-        st.info("Analysis is running in the background...")
-        if st_lottie and lottie_loading:
-            st_lottie(lottie_loading, height=120, key="loading_process")
-        # Auto-refresh to check for process completion
-        st_autorefresh(interval=2000, limit=None, key="analysis_refresh")
+    st.info("Analysis is running in the background...")
+    if st_lottie and lottie_loading:
+        st_lottie(lottie_loading, height=120, key="loading_process")
+
+if st.session_state.get('finished_result') is not None:
+    result = st.session_state.finished_result
+    st.session_state.finished_result = None
+    if isinstance(result, Exception):
+        st.error(f"Analysis failed: {result}")
     else:
-        # Process is finished, but results might not be in the queue yet.
-        st.session_state.analysis_process.join()
-        result = st.session_state.result_queue.get() if not st.session_state.result_queue.empty() else None
-
-        if result is not None:
-            # Result is retrieved, process it and clean up state.
-            st.session_state.analysis_process = None
-            st.session_state.result_queue = None
-
-            if isinstance(result, Exception):
-                st.error(f"Analysis failed: {result}")
-            else:
-                df, results = result
-                st.session_state['data'] = df
-                st.session_state['results'] = results
-                st.session_state['last_run'] = datetime.now(timezone.utc).isoformat()
-                st.success("Analysis complete! 🎉")
-                st.balloons()
-
-            # Trigger a rerun to clear the autorefresh and show final state
-            if st.session_state.get('run_247_enabled', False):
-                 st.rerun()
-        else:
-            # Result not yet in queue, wait and refresh.
-            st.info("Analysis process finished. Waiting for results...")
-            st_autorefresh(interval=1000, limit=None, key="result_wait_refresh")
+        df, results = result
+        st.session_state['data'] = df
+        st.session_state['results'] = results
+        st.session_state['last_run'] = datetime.now(timezone.utc).isoformat()
+        st.success("Analysis complete! 🎉")
+        st.balloons()
+    if st.session_state.get('run_247_enabled', False):
+        st.rerun()
 
 if st.session_state['data'] is not None:
     df = st.session_state['data']
