@@ -9,7 +9,7 @@ import sqlite3
 import time
 import sys
 from multiprocessing import Process, Queue
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from streamlit_autorefresh import st_autorefresh
 from sklearn.linear_model import LinearRegression
 import numpy as np
@@ -84,7 +84,8 @@ last_update = get_last_volume_update_time()
 
 if last_update:
     next_update_time = last_update + timedelta(hours=1)
-    now_utc = datetime.now(last_update.tzinfo)
+    # Explicitly use UTC for current time to ensure correct comparison
+    now_utc = datetime.now(timezone.utc)
 
     if now_utc < next_update_time:
         st_autorefresh(interval=1000, limit=None, key="volume_countdown_refresh")
@@ -125,13 +126,55 @@ def sidebar_config():
 
 config = sidebar_config()
 
+st.sidebar.subheader("24/7 Mode")
+enable_247 = st.sidebar.checkbox("Enable 24/7 Mode Controls")
+
+if enable_247:
+    current_interval = st.session_state.get('continuous_interval_minutes', 60)
+    new_interval = st.sidebar.number_input(
+        "Interval (minutes)", min_value=0, value=current_interval, step=5,
+        help="Set to 0 for instant, continuous analysis."
+    )
+    st.session_state.continuous_interval_minutes = new_interval
+
+    if st.session_state.get('run_247_enabled', False):
+        if st.sidebar.button("Stop 24/7 Mode"):
+            st.session_state.run_247_enabled = False
+            st.experimental_rerun()
+    else:
+        if st.sidebar.button("Start 24/7 Mode"):
+            st.session_state.run_247_enabled = True
+            st.experimental_rerun()
+
+if st.session_state.get('run_247_enabled', False):
+    st.sidebar.success(f"✅ 24/7 Mode is ACTIVE (interval: {st.session_state.continuous_interval_minutes} min)")
+
+
 # Main UI
 if 'data' not in st.session_state:
     st.session_state['data'] = None
     st.session_state['results'] = None
-    st.session_state['continuous'] = False
-    st.session_state['interval_minutes'] = 60
+    st.session_state['continuous'] = False # Deprecated but kept for safety
+    st.session_state['interval_minutes'] = 60 # Deprecated
     st.session_state['last_run'] = None
+
+# Re-implement 24/7 mode logic
+if st.session_state.get('run_247_enabled', False):
+    st_autorefresh(interval=2000, limit=None, key="continuous_refresh")
+    if not st.session_state.analysis_process:
+        interval_minutes = st.session_state.get('continuous_interval_minutes', 60)
+        should_run = False
+        if st.session_state.get('last_run') is None:
+            should_run = True
+        else:
+            last_ts = datetime.fromisoformat(st.session_state['last_run'])
+            elapsed_seconds = (datetime.utcnow() - last_ts).total_seconds()
+            if elapsed_seconds / 60 >= interval_minutes:
+                should_run = True
+
+        if should_run:
+            st.session_state['run_analysis_on_rerun'] = True
+            st.experimental_rerun()
 
 st.markdown("""
 Run a full market analysis and get a ranked table of profitable sets. 
@@ -142,18 +185,9 @@ if 'analysis_process' not in st.session_state:
     st.session_state.analysis_process = None
     st.session_state.result_queue = None
 
-col_run, col_toggle = st.columns([2, 2])
-with col_run:
-    run_btn = st.button("Run Analysis", type="primary")
-    stop_btn = st.button("Stop")
-    quit_btn = st.button("Quit")
-
-with col_toggle:
-    st.checkbox("24/7 Mode", key='continuous', help="Continuously fetch and append data.")
-    if st.session_state.get('continuous', False):
-        st.session_state['interval_minutes'] = st.number_input(
-            "Interval (minutes)", min_value=5, max_value=240, value=60, step=5
-        )
+run_btn = st.button("Run Analysis", type="primary")
+stop_btn = st.button("Stop")
+quit_btn = st.button("Quit")
 
 if st.session_state.get('run_analysis_on_rerun', False):
     st.session_state['run_analysis_on_rerun'] = False
@@ -306,23 +340,6 @@ if st.session_state['data'] is not None:
                 st.info("Linear regression requires cumulative data from multiple runs. Run analysis a few times first.")
     with col2:
         st.info("24/7 Mode appends data every interval so regression improves over time. Adjust weights or toggles in the sidebar and rerun analysis.")
-
-    # 24/7 Mode: display status and schedule next run
-    if st.session_state.get('continuous', False):
-        st.markdown("---")
-        st.subheader("24/7 Mode Status")
-        last = st.session_state.get('last_run', "Never")
-        st.markdown(f"Last run (UTC): {last}")
-        st.markdown(f"Interval: {int(st.session_state.get('interval_minutes', 60))} minutes")
-
-        if st.session_state.get('last_run'):
-            try:
-                last_ts = datetime.fromisoformat(st.session_state['last_run'])
-                elapsed_min = (datetime.utcnow() - last_ts).total_seconds() / 60.0
-                if elapsed_min >= int(st.session_state.get('interval_minutes', 60)):
-                    st.session_state['run_analysis_on_rerun'] = True
-            except Exception as e:
-                st.error(f"Error in 24/7 mode scheduler: {e}")
 
 st.markdown("""
 ---
