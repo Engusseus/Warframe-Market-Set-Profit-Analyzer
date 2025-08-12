@@ -231,21 +231,32 @@ if st.session_state.analysis_process:
         # Auto-refresh to check for process completion
         st_autorefresh(interval=2000, limit=None, key="analysis_refresh")
     else:
-        st.session_state.analysis_process.join() # Ensure process has finished
-        # Safely get from queue
+        # Process is finished, but results might not be in the queue yet.
+        st.session_state.analysis_process.join()
         result = st.session_state.result_queue.get() if not st.session_state.result_queue.empty() else None
-        st.session_state.analysis_process = None
-        st.session_state.result_queue = None
 
-        if isinstance(result, Exception):
-            st.error(f"Analysis failed: {result}")
+        if result is not None:
+            # Result is retrieved, process it and clean up state.
+            st.session_state.analysis_process = None
+            st.session_state.result_queue = None
+
+            if isinstance(result, Exception):
+                st.error(f"Analysis failed: {result}")
+            else:
+                df, results = result
+                st.session_state['data'] = df
+                st.session_state['results'] = results
+                st.session_state['last_run'] = datetime.utcnow().isoformat()
+                st.success("Analysis complete! 🎉")
+                st.balloons()
+
+            # Trigger a rerun to clear the autorefresh and show final state
+            if st.session_state.get('run_247_enabled', False):
+                 st.experimental_rerun()
         else:
-            df, results = result
-            st.session_state['data'] = df
-            st.session_state['results'] = results
-            st.session_state['last_run'] = datetime.utcnow().isoformat()
-            st.success("Analysis complete! 🎉")
-            st.balloons()
+            # Result not yet in queue, wait and refresh.
+            st.info("Analysis process finished. Waiting for results...")
+            st_autorefresh(interval=1000, limit=None, key="result_wait_refresh")
 
 if st.session_state['data'] is not None:
     df = st.session_state['data']
