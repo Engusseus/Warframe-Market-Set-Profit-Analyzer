@@ -168,7 +168,7 @@ if st.session_state.get('run_247_enabled', False):
             should_run = True
         else:
             last_ts = datetime.fromisoformat(st.session_state['last_run'])
-            elapsed_seconds = (datetime.utcnow() - last_ts).total_seconds()
+            elapsed_seconds = (datetime.now(timezone.utc) - last_ts).total_seconds()
             if elapsed_seconds / 60 >= interval_minutes:
                 should_run = True
 
@@ -246,7 +246,7 @@ if st.session_state.analysis_process:
                 df, results = result
                 st.session_state['data'] = df
                 st.session_state['results'] = results
-                st.session_state['last_run'] = datetime.utcnow().isoformat()
+                st.session_state['last_run'] = datetime.now(timezone.utc).isoformat()
                 st.success("Analysis complete! 🎉")
                 st.balloons()
 

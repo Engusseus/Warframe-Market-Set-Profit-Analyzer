@@ -12,7 +12,7 @@ import logging
 import os
 import glob
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -790,7 +790,7 @@ class SetProfitAnalyzer:
                 """
             )
 
-            run_ts = datetime.utcnow().isoformat()
+            run_ts = datetime.now(timezone.utc).isoformat()
             platform = HEADERS.get("Platform", "pc")
             rows = []
             for result in self.results:
