@@ -140,11 +140,11 @@ if enable_247:
     if st.session_state.get('run_247_enabled', False):
         if st.sidebar.button("Stop 24/7 Mode"):
             st.session_state.run_247_enabled = False
-            st.experimental_rerun()
+            st.rerun()
     else:
         if st.sidebar.button("Start 24/7 Mode"):
             st.session_state.run_247_enabled = True
-            st.experimental_rerun()
+            st.rerun()
 
 if st.session_state.get('run_247_enabled', False):
     st.sidebar.success(f"✅ 24/7 Mode is ACTIVE (interval: {st.session_state.continuous_interval_minutes} min)")
@@ -174,7 +174,7 @@ if st.session_state.get('run_247_enabled', False):
 
         if should_run:
             st.session_state['run_analysis_on_rerun'] = True
-            st.experimental_rerun()
+            st.rerun()
 
 st.markdown("""
 Run a full market analysis and get a ranked table of profitable sets. 
@@ -252,7 +252,7 @@ if st.session_state.analysis_process:
 
             # Trigger a rerun to clear the autorefresh and show final state
             if st.session_state.get('run_247_enabled', False):
-                 st.experimental_rerun()
+                 st.rerun()
         else:
             # Result not yet in queue, wait and refresh.
             st.info("Analysis process finished. Waiting for results...")
