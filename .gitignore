@@ -3,6 +3,8 @@ venv/
 
 # Claude Code configuration
 .claude/
+CLAUDE.md
+INITIAL.md
 
 # Python cache files
 __pycache__/
