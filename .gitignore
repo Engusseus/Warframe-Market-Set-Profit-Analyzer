@@ -1,10 +1,16 @@
-# Python
+# Virtual environment
+venv/
+
+# Claude Code configuration
+.claude/
+
+# Python cache files
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
+
+# Distribution / packaging
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -16,25 +22,47 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 
-# Virtual Environment
-venv/
-ENV/
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Environments
+.env
+.venv
 env/
+ENV/
+env.bak/
+venv.bak/
 
 # IDE files
-.idea/
 .vscode/
+.idea/
 *.swp
 *.swo
-.DS_Store
+*~
 
-# Project-specific
-*.log
-set_profit_analysis.csv
-set_profit_analysis.xlsx
-set_profit_analysis_detailed.json
-data/*.json
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
