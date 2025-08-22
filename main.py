@@ -328,6 +328,86 @@ def fetch_set_lowest_prices(cached_data, requests_module, rate_limiter):
     
     return lowest_prices
 
+def fetch_set_volume(cached_data, requests_module, rate_limiter):
+    """Fetch total 48-hour volume for all Prime sets using cached data."""
+    if not cached_data or 'detailed_sets' not in cached_data:
+        print("No cached set data available for volume calculation.")
+        return 0
+    
+    detailed_sets = cached_data['detailed_sets']
+    total_volume = 0
+    successful_fetches = 0
+    
+    print(f"\nFetching 48-hour volume data for {len(detailed_sets)} Prime Sets...")
+    print("Rate limited to 3 requests per second for API safety.")
+    print("=" * 60)
+    
+    for i, set_data in enumerate(detailed_sets, 1):
+        set_name = set_data.get('name', 'Unknown Set')
+        set_slug = set_data.get('slug', '')
+        
+        if not set_slug:
+            print(f"Skipping {set_name} - No slug available")
+            continue
+        
+        print(f"Fetching volume for set {i}/{len(detailed_sets)}: {set_name}")
+        
+        # Use v1 statistics endpoint (v2 doesn't support statistics data)
+        url = f"https://api.warframe.market/v1/items/{set_slug}/statistics"
+        
+        # Use retry logic
+        response = fetch_with_retry(url, requests_module, rate_limiter)
+        
+        if response is None:
+            print(f"  → No volume data available")
+            continue
+        
+        try:
+            data = response.json()
+        except Exception as e:
+            print(f"  → Error parsing JSON response: {e}")
+            continue
+        
+        # Validate response structure
+        if not isinstance(data, dict) or 'payload' not in data:
+            print(f"  → Unexpected response structure")
+            continue
+        
+        payload = data.get("payload", {})
+        if not isinstance(payload, dict):
+            print(f"  → Invalid payload structure")
+            continue
+        
+        statistics_closed = payload.get("statistics_closed", {})
+        if not isinstance(statistics_closed, dict):
+            print(f"  → No statistics_closed data")
+            continue
+        
+        hours_48_data = statistics_closed.get("48hours", [])
+        if not isinstance(hours_48_data, list):
+            print(f"  → No 48hours data")
+            continue
+        
+        # Sum up all volume values from 48hours data
+        set_volume = 0
+        for entry in hours_48_data:
+            if isinstance(entry, dict):
+                volume = entry.get("volume", 0)
+                if isinstance(volume, (int, float)) and volume >= 0:
+                    set_volume += volume
+        
+        if set_volume > 0:
+            total_volume += set_volume
+            successful_fetches += 1
+            print(f"  → Volume: {set_volume} units")
+        else:
+            print(f"  → No volume data found")
+    
+    print(f"\nVolume data fetched for {successful_fetches}/{len(detailed_sets)} sets")
+    print(f"Total 48-hour volume: {total_volume} units")
+    
+    return total_volume
+
 def fetch_part_lowest_prices(cached_data, requests_module, rate_limiter):
     """Fetch lowest prices for all Prime parts using cached data."""
     if not cached_data or 'detailed_sets' not in cached_data:
@@ -386,11 +466,22 @@ def fetch_part_lowest_prices(cached_data, requests_module, rate_limiter):
     
     return part_lowest_prices
 
-def display_pricing_summary(set_prices, part_prices):
-    """Display a comprehensive pricing summary."""
+def display_pricing_summary(set_prices, part_prices, *, total_volume=0):
+    """Display a comprehensive pricing summary with volume data."""
     print("\n" + "=" * 80)
-    print("PRICING SUMMARY")
+    print("PRICING & VOLUME SUMMARY")
     print("=" * 80)
+    
+    # Display volume data first
+    if total_volume > 0:
+        print(f"\nTOTAL 48-HOUR TRADING VOLUME")
+        print("-" * 60)
+        print(f"Combined volume for all Prime Sets: {total_volume:,} units traded")
+        print("Note: Volume data from past 48 hours, updated every few hours by Warframe Market")
+    else:
+        print(f"\nTOTAL 48-HOUR TRADING VOLUME")
+        print("-" * 60)
+        print("No volume data available")
     
     # Display set prices
     if set_prices:
@@ -540,8 +631,11 @@ def get_prime_sets():
                 # Fetch part lowest prices
                 part_prices = fetch_part_lowest_prices(cache, requests, rate_limiter)
                 
+                # Fetch total 48-hour volume
+                total_volume = fetch_set_volume(cache, requests, rate_limiter)
+                
                 # Display pricing summary
-                display_pricing_summary(set_prices, part_prices)
+                display_pricing_summary(set_prices, part_prices, total_volume=total_volume)
                 return
             
             # Data has changed or no cache exists, fetch fresh data
@@ -631,8 +725,11 @@ def get_prime_sets():
             # Fetch part lowest prices
             part_prices = fetch_part_lowest_prices(cache_data, requests, rate_limiter)
             
+            # Fetch total 48-hour volume
+            total_volume = fetch_set_volume(cache_data, requests, rate_limiter)
+            
             # Display pricing summary
-            display_pricing_summary(set_prices, part_prices)
+            display_pricing_summary(set_prices, part_prices, total_volume=total_volume)
             
         else:
             print(f"Error {response.status_code}: {response.text}")
