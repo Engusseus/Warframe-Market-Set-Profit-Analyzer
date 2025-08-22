@@ -5,6 +5,7 @@ import venv
 import time
 import hashlib
 import json
+import statistics
 from collections import deque
 
 def setup_venv():
@@ -170,6 +171,286 @@ def load_cache():
             print(f"Warning: Could not load cache file: {e}")
     return {}
 
+def calculate_lowest_price(prices):
+    """Calculate lowest price from a list of prices."""
+    if not prices:
+        return 0
+    return min(prices)
+
+def calculate_pricing_statistics(prices):
+    """Calculate comprehensive pricing statistics."""
+    if not prices:
+        return {
+            'lowest': 0,
+            'mean': 0,
+            'std_dev': 0,
+            'min': 0,
+            'max': 0,
+            'count': 0
+        }
+    
+    stats = {
+        'lowest': min(prices),
+        'mean': statistics.mean(prices),
+        'min': min(prices),
+        'max': max(prices),
+        'count': len(prices)
+    }
+    
+    if len(prices) > 1:
+        stats['std_dev'] = statistics.stdev(prices)
+    else:
+        stats['std_dev'] = 0
+    
+    return stats
+
+def fetch_with_retry(url, requests_module, rate_limiter, max_retries=3):
+    """Fetch URL with exponential backoff retry logic."""
+    for attempt in range(max_retries):
+        try:
+            rate_limiter.wait_if_needed()
+            response = requests_module.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                return response
+            elif response.status_code == 429:  # Rate limited
+                wait_time = 2 ** attempt
+                print(f"Rate limited, waiting {wait_time}s before retry...")
+                time.sleep(wait_time)
+                continue
+            elif response.status_code == 404:
+                # Item not found, don't retry
+                return None
+            else:
+                print(f"HTTP {response.status_code} for {url}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    time.sleep(wait_time)
+                continue
+                
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait_time = 2 ** attempt
+                print(f"Request failed (attempt {attempt + 1}): {e}, retrying in {wait_time}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"Request failed after {max_retries} attempts: {e}")
+                return None
+    
+    return None
+
+def fetch_item_prices(item_identifier, requests_module, rate_limiter, identifier_type="slug"):
+    """Fetch top sell orders for a specific item and return platinum values."""
+    url = f"https://api.warframe.market/v2/orders/item/{item_identifier}/top"
+    
+    # Use retry logic
+    response = fetch_with_retry(url, requests_module, rate_limiter)
+    
+    if response is None:
+        return []
+    
+    try:
+        data = response.json()
+    except Exception as e:
+        print(f"Error: Invalid JSON response for {item_identifier}: {e}")
+        return []
+    
+    # Validate response structure
+    if not isinstance(data, dict) or 'data' not in data:
+        print(f"Error: Unexpected response structure for {item_identifier}")
+        return []
+    
+    orders_data = data.get("data", {})
+    if not isinstance(orders_data, dict):
+        print(f"Error: Expected orders data to be dict for {item_identifier}")
+        return []
+    
+    sell_orders = orders_data.get("sell", [])
+    if not isinstance(sell_orders, list):
+        print(f"Error: Expected list of sell orders for {item_identifier}")
+        return []
+    
+    # Extract and validate prices
+    sell_prices = []
+    for order in sell_orders:
+        if isinstance(order, dict):
+            platinum = order.get("platinum")
+            if isinstance(platinum, (int, float)) and platinum > 0:
+                sell_prices.append(platinum)
+    
+    return sell_prices
+
+def fetch_set_lowest_prices(cached_data, requests_module, rate_limiter):
+    """Fetch lowest prices for all Prime sets using cached data."""
+    if not cached_data or 'detailed_sets' not in cached_data:
+        print("No cached set data available for pricing.")
+        return []
+    
+    lowest_prices = []
+    detailed_sets = cached_data['detailed_sets']
+    
+    print(f"\nFetching pricing data for {len(detailed_sets)} Prime Sets...")
+    print("Rate limited to 3 requests per second for API safety.")
+    print("=" * 60)
+    
+    for i, set_data in enumerate(detailed_sets, 1):
+        set_name = set_data.get('name', 'Unknown Set')
+        set_id = set_data.get('id', '')
+        
+        if not set_id:
+            print(f"Skipping {set_name} - No ID available")
+            continue
+        
+        print(f"Fetching prices for set {i}/{len(detailed_sets)}: {set_name}")
+        
+        # Use original slug from cache instead of generating it
+        set_slug = set_data.get('slug', '')
+        if not set_slug:
+            print(f"  → No slug available for {set_name}")
+            continue
+        
+        prices = fetch_item_prices(set_slug, requests_module, rate_limiter)
+        
+        if prices:
+            stats = calculate_pricing_statistics(prices)
+            lowest_prices.append({
+                'slug': set_slug,
+                'name': set_name,
+                'id': set_id,
+                'lowest_price': stats['lowest'],
+                'price_count': stats['count'],
+                'min_price': stats['min'],
+                'max_price': stats['max']
+            })
+            print(f"  → Lowest price: {stats['lowest']} platinum (from {stats['count']} sellers)")
+        else:
+            print(f"  → No valid prices found")
+    
+    return lowest_prices
+
+def fetch_part_lowest_prices(cached_data, requests_module, rate_limiter):
+    """Fetch lowest prices for all Prime parts using cached data."""
+    if not cached_data or 'detailed_sets' not in cached_data:
+        print("No cached set data available for part pricing.")
+        return []
+    
+    part_lowest_prices = []
+    detailed_sets = cached_data['detailed_sets']
+    
+    # Use dict to deduplicate parts by code
+    unique_parts = {}
+    for set_data in detailed_sets:
+        parts = set_data.get('setParts', [])
+        for part in parts:
+            part_code = part.get('code')
+            if part_code and part_code not in unique_parts:
+                unique_parts[part_code] = part
+    
+    # Convert to list for processing
+    all_parts = list(unique_parts.values())
+    
+    if not all_parts:
+        print("No parts found in cached data.")
+        return []
+    
+    print(f"\nFetching pricing data for {len(all_parts)} Prime Parts...")
+    print("Rate limited to 3 requests per second for API safety.")
+    print("=" * 60)
+    
+    for i, part in enumerate(all_parts, 1):
+        part_code = part.get('code', '')
+        part_name = part.get('name', 'Unknown Part')
+        
+        if not part_code:
+            print(f"Skipping {part_name} - No code available")
+            continue
+        
+        print(f"Fetching prices for part {i}/{len(all_parts)}: {part_name}")
+        
+        prices = fetch_item_prices(part_code, requests_module, rate_limiter, "id")
+        
+        if prices:
+            stats = calculate_pricing_statistics(prices)
+            part_lowest_prices.append({
+                'slug': part_code,
+                'name': part_name,
+                'lowest_price': stats['lowest'],
+                'price_count': stats['count'],
+                'min_price': stats['min'],
+                'max_price': stats['max'],
+                'quantity_in_set': part.get('quantityInSet', 1)
+            })
+            print(f"  → Lowest price: {stats['lowest']} platinum (from {stats['count']} sellers)")
+        else:
+            print(f"  → No valid prices found")
+    
+    return part_lowest_prices
+
+def display_pricing_summary(set_prices, part_prices):
+    """Display a comprehensive pricing summary."""
+    print("\n" + "=" * 80)
+    print("PRICING SUMMARY")
+    print("=" * 80)
+    
+    # Display set prices
+    if set_prices:
+        print(f"\nPRIME SET LOWEST PRICES ({len(set_prices)} sets)")
+        print("-" * 60)
+        set_prices_sorted = sorted(set_prices, key=lambda x: x['lowest_price'], reverse=True)
+        
+        for i, set_data in enumerate(set_prices_sorted, 1):
+            name = set_data['name']
+            price = set_data['lowest_price']
+            count = set_data['price_count']
+            min_price = set_data['min_price']
+            max_price = set_data['max_price']
+            print(f"{i:3d}. {name:<35} {price:>6.0f} plat ({min_price}-{max_price}) ({count} sellers)")
+        
+        total_set_value = sum(s['lowest_price'] for s in set_prices)
+        avg_set_price = total_set_value / len(set_prices)
+        
+        print(f"\nTotal market value of all sets: {total_set_value:.0f} platinum")
+        print(f"Average set price: {avg_set_price:.0f} platinum")
+    else:
+        print("\nNo set pricing data available")
+    
+    # Display part prices
+    if part_prices:
+        print(f"\nPRIME PART LOWEST PRICES ({len(part_prices)} parts)")
+        print("-" * 60)
+        part_prices_sorted = sorted(part_prices, key=lambda x: x['lowest_price'], reverse=True)
+        
+        # Show top 20 most expensive parts
+        top_parts = part_prices_sorted[:20]
+        print("Top 20 Most Expensive Parts:")
+        for i, part_data in enumerate(top_parts, 1):
+            name = part_data['name']
+            price = part_data['lowest_price']
+            count = part_data['price_count']
+            min_price = part_data['min_price']
+            max_price = part_data['max_price']
+            qty = part_data['quantity_in_set']
+            total_part_cost = price * qty
+            print(f"{i:3d}. {name:<40} {price:>6.0f} plat ({min_price}-{max_price}) x{qty} = {total_part_cost:>6.0f} plat ({count} sellers)")
+        
+        if len(part_prices) > 20:
+            print(f"\n... and {len(part_prices) - 20} more parts")
+        
+        total_part_value = sum(p['lowest_price'] * p['quantity_in_set'] for p in part_prices)
+        avg_part_price = sum(p['lowest_price'] for p in part_prices) / len(part_prices)
+        
+        print(f"\nTotal market value of all parts: {total_part_value:.0f} platinum")
+        print(f"Average part price: {avg_part_price:.0f} platinum")
+    else:
+        print("\nNo part pricing data available")
+    
+    print("\n" + "=" * 80)
+    print("Note: Prices are live market data and change frequently.")
+    print("Lowest prices taken from top 5 online sellers per item.")
+    print("Price ranges show (min-max) from all available sellers.")
+    print("Duplicate parts are automatically deduplicated for efficiency.")
+    print("=" * 80)
+
 def save_cache(data):
     """Save data to cache file."""
     cache_dir = "cache"
@@ -247,6 +528,20 @@ def get_prime_sets():
                 print("=" * 80)
                 print(f"Total Prime Sets processed: {len(detailed_sets)}")
                 print("Data loaded from cache (1 API call instead of many!)")
+                
+                # Fetch pricing data using cached information
+                print("\n" + "=" * 80)
+                print("FETCHING REAL-TIME PRICING DATA")
+                print("=" * 80)
+                
+                # Fetch set lowest prices
+                set_prices = fetch_set_lowest_prices(cache, requests, rate_limiter)
+                
+                # Fetch part lowest prices
+                part_prices = fetch_part_lowest_prices(cache, requests, rate_limiter)
+                
+                # Display pricing summary
+                display_pricing_summary(set_prices, part_prices)
                 return
             
             # Data has changed or no cache exists, fetch fresh data
@@ -280,6 +575,7 @@ def get_prime_sets():
                     complete_set_data = {
                         'id': set_details['id'],
                         'name': set_details['name'],
+                        'slug': slug,  # Store original slug for pricing API
                         'setParts': parts_with_quantities
                     }
                     detailed_sets.append(complete_set_data)
@@ -303,6 +599,7 @@ def get_prime_sets():
                     fallback_data = {
                         'id': '',
                         'name': name,
+                        'slug': slug,  # Store original slug even for fallback
                         'setParts': []
                     }
                     detailed_sets.append(fallback_data)
@@ -323,6 +620,20 @@ def get_prime_sets():
             print("Each set requires 1 API call + 1 additional call per part (rate limited to 3 req/sec)")
             print("Data cached for future use - next run will be much faster if data unchanged!")
             
+            # After caching, fetch pricing data using the fresh cache
+            print("\n" + "=" * 80)
+            print("FETCHING REAL-TIME PRICING DATA")
+            print("=" * 80)
+            
+            # Fetch set lowest prices
+            set_prices = fetch_set_lowest_prices(cache_data, requests, rate_limiter)
+            
+            # Fetch part lowest prices
+            part_prices = fetch_part_lowest_prices(cache_data, requests, rate_limiter)
+            
+            # Display pricing summary
+            display_pricing_summary(set_prices, part_prices)
+            
         else:
             print(f"Error {response.status_code}: {response.text}")
             
@@ -338,7 +649,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
 
 
