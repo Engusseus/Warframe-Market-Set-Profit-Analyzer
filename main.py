@@ -329,12 +329,17 @@ def fetch_set_lowest_prices(cached_data, requests_module, rate_limiter):
     return lowest_prices
 
 def fetch_set_volume(cached_data, requests_module, rate_limiter):
-    """Fetch total 48-hour volume for all Prime sets using cached data."""
+    """Fetch individual 48-hour volume for all Prime sets using cached data.
+    
+    Returns:
+        dict: Dictionary mapping set_slug to volume data, or int for backward compatibility
+    """
     if not cached_data or 'detailed_sets' not in cached_data:
         print("No cached set data available for volume calculation.")
-        return 0
+        return {}
     
     detailed_sets = cached_data['detailed_sets']
+    volume_data = {}
     total_volume = 0
     successful_fetches = 0
     
@@ -397,16 +402,19 @@ def fetch_set_volume(cached_data, requests_module, rate_limiter):
                     set_volume += volume
         
         if set_volume > 0:
+            volume_data[set_slug] = set_volume
             total_volume += set_volume
             successful_fetches += 1
             print(f"  → Volume: {set_volume} units")
         else:
+            volume_data[set_slug] = 0
             print(f"  → No volume data found")
     
     print(f"\nVolume data fetched for {successful_fetches}/{len(detailed_sets)} sets")
     print(f"Total 48-hour volume: {total_volume} units")
     
-    return total_volume
+    # Return both individual volumes and total for backward compatibility
+    return {'individual': volume_data, 'total': total_volume}
 
 def fetch_part_lowest_prices(cached_data, requests_module, rate_limiter):
     """Fetch lowest prices for all Prime parts using cached data."""
@@ -465,6 +473,334 @@ def fetch_part_lowest_prices(cached_data, requests_module, rate_limiter):
             print(f"  → No valid prices found")
     
     return part_lowest_prices
+
+def calculate_profit_margins(set_prices, part_prices, detailed_sets):
+    """Calculate profit margins for each set by comparing set price to sum of part prices.
+    
+    Args:
+        set_prices: List of set pricing data
+        part_prices: List of part pricing data
+        detailed_sets: List of detailed set information from cache
+    
+    Returns:
+        List of profit analysis data for each viable set
+    """
+    profit_data = []
+    
+    if not set_prices or not part_prices or not detailed_sets:
+        print("Warning: Missing required data for profit calculation")
+        return profit_data
+    
+    # Create lookup dictionaries for faster access
+    set_price_lookup = {item['slug']: item for item in set_prices}
+    part_price_lookup = {item['slug']: item for item in part_prices}
+    
+    print(f"\nCalculating profit margins for {len(detailed_sets)} Prime Sets...")
+    print("=" * 60)
+    
+    for set_data in detailed_sets:
+        set_slug = set_data.get('slug', '')
+        set_name = set_data.get('name', 'Unknown Set')
+        
+        if not set_slug or set_slug not in set_price_lookup:
+            print(f"Skipping {set_name} - No pricing data available")
+            continue
+        
+        set_price_data = set_price_lookup[set_slug]
+        set_lowest_price = set_price_data['lowest_price']
+        
+        # Calculate total cost of individual parts
+        total_part_cost = 0
+        missing_parts = []
+        part_details = []
+        
+        for part in set_data.get('setParts', []):
+            part_code = part.get('code', '')
+            part_name = part.get('name', 'Unknown Part')
+            quantity_needed = part.get('quantityInSet', 1)
+            
+            if part_code in part_price_lookup:
+                part_price_data = part_price_lookup[part_code]
+                part_lowest_price = part_price_data['lowest_price']
+                part_total_cost = part_lowest_price * quantity_needed
+                total_part_cost += part_total_cost
+                
+                part_details.append({
+                    'name': part_name,
+                    'code': part_code,
+                    'unit_price': part_lowest_price,
+                    'quantity': quantity_needed,
+                    'total_cost': part_total_cost
+                })
+            else:
+                missing_parts.append(part_name)
+        
+        # Skip sets with missing part data
+        if missing_parts:
+            print(f"Skipping {set_name} - Missing part pricing: {', '.join(missing_parts)}")
+            continue
+        
+        # Calculate profit margin
+        if total_part_cost > 0:
+            profit_margin = set_lowest_price - total_part_cost
+            profit_percentage = (profit_margin / total_part_cost) * 100
+            
+            profit_data.append({
+                'set_slug': set_slug,
+                'set_name': set_name,
+                'set_price': set_lowest_price,
+                'part_cost': total_part_cost,
+                'profit_margin': profit_margin,
+                'profit_percentage': profit_percentage,
+                'part_details': part_details
+            })
+            
+            print(f"{set_name}: {profit_margin:+.0f} plat ({profit_percentage:+.1f}%)")
+        else:
+            print(f"Skipping {set_name} - Zero part cost calculated")
+    
+    print(f"\nProfit analysis completed for {len(profit_data)} sets")
+    return profit_data
+
+def normalize_data(values, min_val=None, max_val=None):
+    """Normalize a list of values to 0-1 range.
+    
+    Args:
+        values: List of numeric values to normalize
+        min_val: Optional minimum value override
+        max_val: Optional maximum value override
+    
+    Returns:
+        List of normalized values in range [0, 1]
+    """
+    if not values:
+        return []
+    
+    if min_val is None:
+        min_val = min(values)
+    if max_val is None:
+        max_val = max(values)
+    
+    # Handle case where all values are the same
+    if max_val == min_val:
+        # Return zeros instead of 0.5 to avoid artificial boosting
+        return [0.0] * len(values)
+    
+    range_val = max_val - min_val
+    return [(value - min_val) / range_val for value in values]
+
+def get_user_weights():
+    """Get user-defined weights for profit and volume factors.
+    
+    Returns:
+        tuple: (profit_weight, volume_weight) as floats
+    """
+    print("\n" + "=" * 60)
+    print("SCORING WEIGHT CONFIGURATION")
+    print("=" * 60)
+    print("Configure how much weight to give each factor in the final score:")
+    print("• Profit Weight: How much to emphasize profit margins")
+    print("• Volume Weight: How much to emphasize trading volume")
+    print("\nDefault weights: Profit=1.0, Volume=1.2")
+    print("Higher weights mean more importance in final ranking")
+    print("Note: Set weight to 0 to ignore that factor completely")
+    
+    max_attempts = 3
+    attempts = 0
+    
+    while attempts < max_attempts:
+        try:
+            print("\nWeight Selection:")
+            print("1. Use default weights (Profit=1.0, Volume=1.2)")
+            print("2. Custom weights")
+            
+            choice = input("\nEnter choice (1-2): ").strip()
+            
+            if choice == "1":
+                print("Using default weights: Profit=1.0, Volume=1.2")
+                return 1.0, 1.2
+            elif choice == "2":
+                profit_weight = float(input("Enter profit weight (0.0-10.0): "))
+                volume_weight = float(input("Enter volume weight (0.0-10.0): "))
+                
+                if profit_weight < 0 or volume_weight < 0:
+                    print("Error: Weights must be non-negative numbers")
+                    attempts += 1
+                    continue
+                
+                if profit_weight > 10 or volume_weight > 10:
+                    print("Warning: Very high weights (>10) may skew results")
+                    confirm = input("Continue anyway? (y/N): ").strip().lower()
+                    if confirm != 'y':
+                        attempts += 1
+                        continue
+                
+                print(f"Using custom weights: Profit={profit_weight}, Volume={volume_weight}")
+                return profit_weight, volume_weight
+            else:
+                print("Invalid choice. Please enter 1 or 2.")
+                attempts += 1
+                continue
+                
+        except (ValueError, EOFError, KeyboardInterrupt):
+            attempts += 1
+            if attempts < max_attempts:
+                print(f"Invalid input. Please try again. ({max_attempts - attempts} attempts remaining)")
+            else:
+                print("Too many invalid attempts. Using default weights.")
+                return 1.0, 1.2
+    
+    print("Maximum attempts reached. Using default weights.")
+    return 1.0, 1.2
+
+def calculate_profitability_scores(profit_data, volume_data, profit_weight=1.0, volume_weight=1.2):
+    """Calculate profitability scores combining profit and volume data.
+    
+    Args:
+        profit_data: List of profit analysis results
+        volume_data: Dict with 'individual' and 'total' keys, or legacy format
+        profit_weight: Weight for profit factor (default: 1.0)
+        volume_weight: Weight for volume factor (default: 1.2)
+    
+    Returns:
+        List of scored data sorted by total score (descending)
+    """
+    if not profit_data:
+        print("No profit data available for scoring")
+        return []
+    
+    # Handle different volume data formats
+    volume_lookup = {}
+    
+    if isinstance(volume_data, dict) and 'individual' in volume_data:
+        # New format with individual volumes
+        volume_lookup = volume_data['individual'].copy()
+    elif isinstance(volume_data, (int, float)):
+        # Legacy format - total volume only
+        print("Warning: Using total volume only. Individual set volumes not available.")
+        print("Volume scores will be equal for all sets.")
+        # Set all volumes to 1 so they don't affect relative scoring
+        for item in profit_data:
+            volume_lookup[item['set_slug']] = 1
+    else:
+        # Handle other legacy formats
+        if isinstance(volume_data, list):
+            for item in volume_data:
+                if isinstance(item, dict) and 'set_slug' in item:
+                    volume_lookup[item['set_slug']] = item.get('volume', 0)
+        else:
+            print("Warning: Unrecognized volume data format. Using equal volumes.")
+            for item in profit_data:
+                volume_lookup[item['set_slug']] = 1
+    
+    # Extract values for normalization
+    profit_values = [item['profit_margin'] for item in profit_data]
+    volume_values = []
+    
+    for item in profit_data:
+        set_slug = item['set_slug']
+        volume = volume_lookup.get(set_slug, 0)
+        volume_values.append(volume)
+    
+    # Normalize both datasets to 0-1 range
+    normalized_profits = normalize_data(profit_values)
+    normalized_volumes = normalize_data(volume_values)
+    
+    # Calculate weighted scores
+    scored_data = []
+    for i, profit_item in enumerate(profit_data):
+        profit_score = normalized_profits[i] * profit_weight
+        volume_score = normalized_volumes[i] * volume_weight
+        total_score = profit_score + volume_score
+        
+        scored_data.append({
+            **profit_item,
+            'volume': volume_values[i],
+            'normalized_profit': normalized_profits[i],
+            'normalized_volume': normalized_volumes[i],
+            'profit_score': profit_score,
+            'volume_score': volume_score,
+            'total_score': total_score
+        })
+    
+    # Sort by total score (descending)
+    scored_data.sort(key=lambda x: x['total_score'], reverse=True)
+    
+    return scored_data
+
+def display_top_profitable_sets(scored_data, top_n=10, detailed_n=5):
+    """Display the top N most profitable sets with detailed analysis.
+    
+    Args:
+        scored_data: List of scored profit data
+        top_n: Number of sets to show in summary table (default: 10)
+        detailed_n: Number of sets to show detailed breakdown (default: 5)
+    """
+    if not scored_data:
+        print("No scoring data available")
+        return
+    
+    actual_top_n = min(top_n, len(scored_data))
+    actual_detailed_n = min(detailed_n, len(scored_data))
+    
+    print("\n" + "=" * 100)
+    print(f"TOP {actual_top_n} MOST PROFITABLE PRIME SETS")
+    print("=" * 100)
+    
+    print(f"{'Rank':<4} {'Set Name':<30} {'Profit':<8} {'Volume':<8} {'Score':<8} {'ROI%':<8} {'Details'}")
+    print("-" * 100)
+    
+    for i, item in enumerate(scored_data[:top_n], 1):
+        set_name = item['set_name']
+        profit = item['profit_margin']
+        volume = item.get('volume', 0)  # Handle missing volume gracefully
+        score = item['total_score']
+        roi = item['profit_percentage']
+        
+        # Better name truncation that preserves readability
+        if len(set_name) > 28:
+            display_name = set_name[:25] + "..."
+        else:
+            display_name = set_name
+        
+        # Handle volume display for different scales
+        if volume >= 1000:
+            volume_str = f"{volume:>6,.0f}k".replace(",", ".")
+        else:
+            volume_str = f"{volume:>7,.0f}"
+        
+        print(f"{i:<4} {display_name:<30} {profit:>+7.0f} {volume_str:<8} {score:>7.2f} {roi:>+6.1f}% {'View below' if i <= detailed_n else ''}")
+    
+    # Display detailed breakdowns
+    print("\n" + "=" * 100)
+    print(f"DETAILED BREAKDOWN (TOP {actual_detailed_n})")
+    print("=" * 100)
+    
+    for i, item in enumerate(scored_data[:actual_detailed_n], 1):
+        print(f"\n{i}. {item['set_name']}")
+        print("-" * 60)
+        print(f"Set Price: {item['set_price']:.0f} platinum")
+        print(f"Part Cost: {item['part_cost']:.0f} platinum")
+        print(f"Profit Margin: {item['profit_margin']:+.0f} platinum ({item['profit_percentage']:+.1f}% ROI)")
+        volume = item.get('volume', 0)
+        if volume > 0:
+            print(f"Trading Volume: {volume:,.0f} units (48h)")
+        else:
+            print("Trading Volume: No data available")
+        print(f"Total Score: {item['total_score']:.2f} (Profit: {item['profit_score']:.2f}, Volume: {item['volume_score']:.2f})")
+        
+        print("\nPart Breakdown:")
+        for part in item['part_details']:
+            print(f"  • {part['name']}: {part['unit_price']:.0f} × {part['quantity']} = {part['total_cost']:.0f} plat")
+    
+    print("\n" + "=" * 100)
+    print("ANALYSIS NOTES:")
+    print("• Profit = Set Price - Total Part Cost")
+    print("• ROI% = (Profit / Part Cost) × 100")
+    print("• Score combines normalized profit and volume with user-defined weights")
+    print("• Higher scores indicate better profit opportunities")
+    print("• Volume data helps identify active vs. stagnant markets")
+    print("=" * 100)
 
 def display_pricing_summary(set_prices, part_prices, *, total_volume=0):
     """Display a comprehensive pricing summary with volume data."""
@@ -631,11 +967,35 @@ def get_prime_sets():
                 # Fetch part lowest prices
                 part_prices = fetch_part_lowest_prices(cache, requests, rate_limiter)
                 
-                # Fetch total 48-hour volume
-                total_volume = fetch_set_volume(cache, requests, rate_limiter)
+                # Fetch 48-hour volume data
+                volume_result = fetch_set_volume(cache, requests, rate_limiter)
+                total_volume = volume_result.get('total', 0) if isinstance(volume_result, dict) else volume_result
                 
                 # Display pricing summary
                 display_pricing_summary(set_prices, part_prices, total_volume=total_volume)
+                
+                # Perform profitability analysis
+                print("\n" + "=" * 80)
+                print("PROFITABILITY ANALYSIS")
+                print("=" * 80)
+                
+                # Get cached detailed sets
+                detailed_sets = cache['detailed_sets']
+                
+                # Calculate profit margins
+                profit_data = calculate_profit_margins(set_prices, part_prices, detailed_sets)
+                
+                if profit_data:
+                    # Get user weights for scoring
+                    profit_weight, volume_weight = get_user_weights()
+                    
+                    # Calculate profitability scores
+                    scored_data = calculate_profitability_scores(profit_data, volume_result, profit_weight, volume_weight)
+                    
+                    # Display top profitable sets
+                    display_top_profitable_sets(scored_data)
+                else:
+                    print("No profitable sets found for analysis.")
                 return
             
             # Data has changed or no cache exists, fetch fresh data
@@ -725,11 +1085,32 @@ def get_prime_sets():
             # Fetch part lowest prices
             part_prices = fetch_part_lowest_prices(cache_data, requests, rate_limiter)
             
-            # Fetch total 48-hour volume
-            total_volume = fetch_set_volume(cache_data, requests, rate_limiter)
+            # Fetch 48-hour volume data
+            volume_result = fetch_set_volume(cache_data, requests, rate_limiter)
+            total_volume = volume_result.get('total', 0) if isinstance(volume_result, dict) else volume_result
             
             # Display pricing summary
             display_pricing_summary(set_prices, part_prices, total_volume=total_volume)
+            
+            # Perform profitability analysis
+            print("\n" + "=" * 80)
+            print("PROFITABILITY ANALYSIS")
+            print("=" * 80)
+            
+            # Calculate profit margins
+            profit_data = calculate_profit_margins(set_prices, part_prices, detailed_sets)
+            
+            if profit_data:
+                # Get user weights for scoring
+                profit_weight, volume_weight = get_user_weights()
+                
+                # Calculate profitability scores
+                scored_data = calculate_profitability_scores(profit_data, volume_result, profit_weight, volume_weight)
+                
+                # Display top profitable sets
+                display_top_profitable_sets(scored_data)
+            else:
+                print("No profitable sets found for analysis.")
             
         else:
             print(f"Error {response.status_code}: {response.text}")
