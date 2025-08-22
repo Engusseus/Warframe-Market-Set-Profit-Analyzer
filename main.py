@@ -3,6 +3,8 @@ import sys
 import subprocess
 import venv
 import time
+import hashlib
+import json
 from collections import deque
 
 def setup_venv():
@@ -153,6 +155,35 @@ def fetch_set_details(slug, requests_module, rate_limiter):
         print(f"Error fetching details for {slug}: {e}")
         return None
 
+def calculate_hash(data):
+    """Calculate SHA-256 hash of data."""
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+def load_cache():
+    """Load cached data from file."""
+    cache_file = os.path.join("cache", "prime_sets_cache.json")
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not load cache file: {e}")
+    return {}
+
+def save_cache(data):
+    """Save data to cache file."""
+    cache_dir = "cache"
+    cache_file = os.path.join(cache_dir, "prime_sets_cache.json")
+    
+    # Ensure cache directory exists
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"Warning: Could not save cache file: {e}")
+
 def get_prime_sets():
     """Fetch and display Prime sets with their parts from Warframe Market API."""
     try:
@@ -163,6 +194,9 @@ def get_prime_sets():
     
     # Initialize rate limiter (3 requests per second)
     rate_limiter = RateLimiter(max_requests=3, time_window=1.0)
+    
+    # Load existing cache
+    cache = load_cache()
     
     print("Fetching Prime sets from Warframe Market API...")
     url = "https://api.warframe.market/v2/items"
@@ -186,12 +220,45 @@ def get_prime_sets():
                 print("No Prime sets found.")
                 return
             
-            print(f"\nFound {len(prime_sets)} Prime Sets. Fetching detailed information...\n")
+            # Calculate hash of prime_sets array
+            current_hash = calculate_hash(prime_sets)
+            cached_hash = cache.get('prime_sets_hash', '')
+            
+            # Check if data has changed
+            if current_hash == cached_hash and 'detailed_sets' in cache:
+                print("Data unchanged since last fetch. Using cached data...")
+                print(f"\nUsing cached data for {len(prime_sets)} Prime Sets.\n")
+                print("=" * 80)
+                
+                # Display cached data
+                detailed_sets = cache['detailed_sets']
+                for i, set_data in enumerate(detailed_sets, 1):
+                    print(f"\n{i:2d}. {set_data['name']} [{set_data['id']}]")
+                    
+                    if set_data.get('setParts'):
+                        print("    Parts:")
+                        for part in set_data['setParts']:
+                            print(f"      - {part['name']} [{part['code']}] (Quantity: {part['quantityInSet']})")
+                    else:
+                        print("    No individual parts found.")
+                    
+                    print()
+                
+                print("=" * 80)
+                print(f"Total Prime Sets processed: {len(detailed_sets)}")
+                print("Data loaded from cache (1 API call instead of many!)")
+                return
+            
+            # Data has changed or no cache exists, fetch fresh data
+            print(f"\nData changed or cache missing. Fetching detailed information for {len(prime_sets)} Prime Sets...\n")
             print("Rate limited to 3 requests per second for API safety.")
             print("=" * 80)
             
             # Sort alphabetically
             prime_sets.sort(key=lambda x: x.get('i18n', {}).get('en', {}).get('name', x.get('slug', '')))
+            
+            # Store detailed information for caching
+            detailed_sets = []
             
             # Fetch details for each set with rate limiting
             for i, item in enumerate(prime_sets, 1):
@@ -202,14 +269,27 @@ def get_prime_sets():
                 set_details = fetch_set_details(slug, requests, rate_limiter)
                 
                 if set_details:
+                    # Fetch part quantities and store complete information
+                    parts_with_quantities = []
+                    for part_code in set_details['setParts']:
+                        # Fetch quantity information for each part
+                        part_info = fetch_part_quantity(part_code, requests, rate_limiter)
+                        parts_with_quantities.append(part_info)
+                    
+                    # Create complete set data for caching
+                    complete_set_data = {
+                        'id': set_details['id'],
+                        'name': set_details['name'],
+                        'setParts': parts_with_quantities
+                    }
+                    detailed_sets.append(complete_set_data)
+                    
                     # Display set information
                     print(f"\n{i:2d}. {set_details['name']} [{set_details['id']}]")
                     
-                    if set_details['setParts']:
+                    if parts_with_quantities:
                         print("    Parts:")
-                        for part_code in set_details['setParts']:
-                            # Fetch quantity information for each part
-                            part_info = fetch_part_quantity(part_code, requests, rate_limiter)
+                        for part_info in parts_with_quantities:
                             print(f"      - {part_info['name']} [{part_info['code']}] (Quantity: {part_info['quantityInSet']})")
                     else:
                         print("    No individual parts found.")
@@ -220,13 +300,28 @@ def get_prime_sets():
                     i18n = item.get('i18n', {})
                     en_info = i18n.get('en', {})
                     name = en_info.get('name', slug.replace('_', ' ').title())
+                    fallback_data = {
+                        'id': '',
+                        'name': name,
+                        'setParts': []
+                    }
+                    detailed_sets.append(fallback_data)
                     print(f"\n{i:2d}. {name} [Details unavailable]")
                     print()
             
+            # Update cache with new data
+            cache_data = {
+                'prime_sets_hash': current_hash,
+                'detailed_sets': detailed_sets,
+                'last_updated': time.time()
+            }
+            save_cache(cache_data)
+            
             print("=" * 80)
-            print(f"Total Prime Sets processed: {len(prime_sets)}")
+            print(f"Total Prime Sets processed: {len(detailed_sets)}")
             print("Note: Processing time will vary based on number of parts per set.")
             print("Each set requires 1 API call + 1 additional call per part (rate limited to 3 req/sec)")
+            print("Data cached for future use - next run will be much faster if data unchanged!")
             
         else:
             print(f"Error {response.status_code}: {response.text}")
@@ -243,5 +338,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
 
 

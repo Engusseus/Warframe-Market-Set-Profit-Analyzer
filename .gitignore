@@ -58,6 +58,10 @@ venv.bak/
 *.swo
 *~
 
+# Cache files (exclude personal cache data but keep folder structure)
+cache/*.json
+cache/*.cache
+
 # OS generated files
 .DS_Store
 .DS_Store?
