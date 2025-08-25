@@ -168,8 +168,7 @@ Warframe-Market-Set-Profit-Analyzer/
 ├── venv/               # Auto-generated virtual environment
 ├── LICENSE             # MIT License
 ├── README.md           # This file
-├── CONTRIBUTING.md     # Contribution guidelines with database examples
-└── CLAUDE.md           # Claude Code development guidance
+└── CONTRIBUTING.md     # Contribution guidelines with database examples
 ```
 
 ### Database Schema
