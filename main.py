@@ -8,6 +8,19 @@ import json
 import statistics
 from collections import deque
 
+try:
+    from rich.console import Console
+    from rich.prompt import Prompt, FloatPrompt, Confirm
+    from rich.table import Table
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.layout import Layout
+    from rich.align import Align
+    from rich.rule import Rule
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
+
 def setup_venv():
     """Set up virtual environment and install dependencies."""
     venv_dir = "venv"
@@ -50,6 +63,264 @@ def activate_venv_and_run():
         print("Activating virtual environment and restarting...")
         subprocess.check_call([python_path, __file__, "--venv-active"])
         sys.exit(0)
+
+def show_ascii_banner(console):
+    """Display ASCII art banner for the application."""
+    if not RICH_AVAILABLE:
+        print("\n" + "="*80)
+        print("    WARFRAME MARKET SET PROFIT ANALYZER")
+        print("="*80)
+        return
+    
+    banner_art = """
+    =============================================================================
+    
+       W   W   AAA   RRRR  FFFFF RRRR   AAA   M   M EEEEE
+       W   W  A   A  R   R F     R   R A   A  MM MM E
+       W W W  AAAAA  RRRR  FFF   RRRR  AAAAA  M M M EEE
+       W W W  A   A  R  R  F     R  R  A   A  M   M E
+        W W   A   A  R   R F     R   R A   A  M   M EEEEE
+       
+                    MARKET SET PROFIT ANALYZER
+                     
+            Find the most profitable Prime sets to trade!
+            
+    =============================================================================
+    """
+    
+    console.print(Panel(
+        Align.center(Text(banner_art, style="bold cyan")),
+        style="bold blue",
+        padding=(0, 1)
+    ))
+    
+    console.print("")
+    console.print(Align.center("Real-time analysis of Warframe Market data", style="bold green"))
+    console.print(Align.center("Profit margins * Trading volume * Smart scoring", style="dim"))
+    console.print("")
+
+def get_cli_weights(console, previous_weights=None):
+    """Get user-defined weights for profit and volume factors using Rich CLI."""
+    if not RICH_AVAILABLE:
+        return get_user_weights()  # Fallback to original function
+    
+    console.print(Rule("SCORING WEIGHT CONFIGURATION", style="bold yellow"))
+    console.print("")
+    
+    # Create an informative panel
+    info_panel = Panel(
+        "[bold]Configure Analysis Weights[/bold]\n\n"
+        "• [cyan]Profit Weight[/cyan]: Emphasizes profit margins in scoring\n"
+        "• [green]Volume Weight[/green]: Emphasizes trading activity/liquidity\n\n"
+        "[dim]Tip: Higher weights = more importance in final ranking\n"
+        "Set to 0 to ignore a factor completely[/dim]",
+        title="Scoring System",
+        border_style="blue"
+    )
+    console.print(info_panel)
+    console.print("")
+    
+    # Show previous weights if available
+    if previous_weights:
+        console.print(f"Previous weights: Profit={previous_weights[0]:.1f}, Volume={previous_weights[1]:.1f}", style="dim")
+        use_previous = Confirm.ask("Use previous weights?", default=True)
+        if use_previous:
+            return previous_weights
+        console.print("")
+    
+    # Get new weights with validation
+    max_attempts = 3
+    attempts = 0
+    
+    while attempts < max_attempts:
+        try:
+            console.print("[bold cyan]Profit Weight[/bold cyan] (default: 1.0)")
+            profit_weight = FloatPrompt.ask(
+                "Enter weight", 
+                default=1.0,
+                show_default=True
+            )
+            
+            console.print("[bold green]Volume Weight[/bold green] (default: 1.2)")
+            volume_weight = FloatPrompt.ask(
+                "Enter weight", 
+                default=1.2,
+                show_default=True
+            )
+            
+            # Validate weights
+            if profit_weight < 0 or volume_weight < 0:
+                console.print("[red]Error: Weights cannot be negative![/red]")
+                attempts += 1
+                continue
+                
+            if profit_weight == 0 and volume_weight == 0:
+                console.print("[red]Error: At least one weight must be greater than 0![/red]")
+                attempts += 1
+                continue
+            
+            # Show confirmation
+            console.print("")
+            console.print(f"Selected weights: [cyan]Profit={profit_weight:.1f}[/cyan], [green]Volume={volume_weight:.1f}[/green]")
+            
+            confirm = Confirm.ask("Confirm these weights?", default=True)
+            if confirm:
+                return profit_weight, volume_weight
+            
+            attempts += 1
+            
+        except (ValueError, KeyboardInterrupt):
+            attempts += 1
+            if attempts < max_attempts:
+                console.print("[red]Invalid input. Please try again.[/red]")
+            else:
+                console.print("[yellow]Too many invalid attempts. Using defaults.[/yellow]")
+                return 1.0, 1.2
+    
+    # Fallback to defaults
+    console.print("[yellow]Using default weights: Profit=1.0, Volume=1.2[/yellow]")
+    return 1.0, 1.2
+
+def display_paginated_results(console, scored_data, items_per_page=20):
+    """Display analysis results with pagination support."""
+    if not RICH_AVAILABLE:
+        return display_top_profitable_sets(scored_data)  # Fallback
+    
+    if not scored_data:
+        console.print("[red]No data to display[/red]")
+        return
+    
+    total_items = len(scored_data)
+    total_pages = (total_items + items_per_page - 1) // items_per_page
+    current_page = 0
+    
+    while True:
+        # Calculate page bounds
+        start_idx = current_page * items_per_page
+        end_idx = min(start_idx + items_per_page, total_items)
+        page_data = scored_data[start_idx:end_idx]
+        
+        # Clear and show header
+        console.clear()
+        show_ascii_banner(console)
+        
+        # Page info
+        console.print(f"[bold cyan]Analysis Results[/bold cyan] - Page {current_page + 1} of {total_pages}")
+        console.print(f"Showing items {start_idx + 1}-{end_idx} of {total_items}")
+        console.print("")
+        
+        # Create results table
+        table = Table(
+            title="Prime Set Profitability Analysis",
+            show_header=True,
+            header_style="bold magenta",
+            border_style="blue"
+        )
+        
+        table.add_column("Rank", justify="center", style="bold")
+        table.add_column("Set Name", style="cyan", min_width=25)
+        table.add_column("Profit", justify="right", style="green")
+        table.add_column("Volume", justify="right", style="yellow")
+        table.add_column("Score", justify="right", style="bold magenta")
+        table.add_column("ROI%", justify="right", style="bold green")
+        
+        # Add rows
+        for i, item in enumerate(page_data, start_idx + 1):
+            set_name = item['set_name']
+            if len(set_name) > 28:
+                set_name = set_name[:25] + "..."
+            
+            profit = f"{item['profit_margin']:.0f} plat"
+            volume = f"{item.get('volume', 0):,.0f}"
+            score = f"{item['total_score']:.3f}"
+            roi = f"{item['profit_percentage']:.1f}%"
+            
+            # Color coding based on rank
+            if i <= 5:
+                rank_style = "bold gold1"
+            elif i <= 10:
+                rank_style = "bold orange1"
+            else:
+                rank_style = "white"
+                
+            table.add_row(
+                f"{i}", set_name, profit, volume, score, roi,
+                style=rank_style if i <= 10 else None
+            )
+        
+        console.print(table)
+        console.print("")
+        
+        # Navigation controls
+        nav_options = []
+        if current_page > 0:
+            nav_options.append("[b]← Previous")
+        if current_page < total_pages - 1:
+            nav_options.append("[n]→ Next")
+        nav_options.append("[q]◄ Back to Menu")
+        
+        console.print("Navigation: " + " | ".join(nav_options))
+        
+        # Get user input
+        choice = Prompt.ask(
+            "Choose action",
+            choices=["b", "n", "q"] if current_page < total_pages - 1 else (["b", "q"] if current_page > 0 else ["q"]),
+            default="q"
+        ).lower()
+        
+        if choice == "b" and current_page > 0:
+            current_page -= 1
+        elif choice == "n" and current_page < total_pages - 1:
+            current_page += 1
+        elif choice == "q":
+            break
+
+def show_post_analysis_menu(console):
+    """Show post-analysis menu options."""
+    if not RICH_AVAILABLE:
+        return show_fallback_menu()  # Simple fallback
+    
+    console.print("")
+    console.print(Rule("WHAT'S NEXT?", style="bold yellow"))
+    
+    menu_panel = Panel(
+        "[1] [bold cyan]Run Analysis Again[/bold cyan]\n"
+        "    Start fresh analysis with new or same weights\n\n"
+        "[2] [bold green]Try Different Weights[/bold green]\n"
+        "    Re-score current data with different weights\n\n" 
+        "[3] [bold red]Quit Application[/bold red]\n"
+        "    Exit the program",
+        title="Menu Options",
+        border_style="blue"
+    )
+    console.print(menu_panel)
+    
+    choice = Prompt.ask(
+        "Select option",
+        choices=["1", "2", "3"],
+        default="3"
+    )
+    
+    return int(choice)
+
+def show_fallback_menu():
+    """Fallback menu when Rich is not available."""
+    print("\n" + "="*50)
+    print("WHAT'S NEXT?")
+    print("="*50)
+    print("1. Run Analysis Again")
+    print("2. Try Different Weights")
+    print("3. Quit Application")
+    print("="*50)
+    
+    while True:
+        try:
+            choice = input("Select option (1-3): ").strip()
+            if choice in ["1", "2", "3"]:
+                return int(choice)
+            print("Invalid choice. Please enter 1, 2, or 3.")
+        except (ValueError, KeyboardInterrupt):
+            return 3
 
 class RateLimiter:
     """Rate limiter to ensure max 3 requests per second."""
@@ -892,236 +1163,394 @@ def save_cache(data):
     except Exception as e:
         print(f"Warning: Could not save cache file: {e}")
 
-def get_prime_sets():
-    """Fetch and display Prime sets with their parts from Warframe Market API."""
+def _initialize_analysis_dependencies():
+    """Initialize dependencies for analysis."""
     try:
         import requests
+        return requests, RateLimiter(max_requests=3, time_window=1.0)
     except ImportError:
-        print("Error: requests module not found. Virtual environment setup may have failed.")
-        return
-    
-    # Initialize rate limiter (3 requests per second)
-    rate_limiter = RateLimiter(max_requests=3, time_window=1.0)
-    
-    # Load existing cache
-    cache = load_cache()
-    
-    print("Fetching Prime sets from Warframe Market API...")
+        raise ImportError("requests module not found. Virtual environment setup may have failed.")
+
+def _show_status_message(console, message):
+    """Display status message to user."""
+    if console and RICH_AVAILABLE:
+        console.print(f"[bold cyan]{message}[/bold cyan]")
+    else:
+        print(message)
+
+def _fetch_prime_sets_list(requests_module):
+    """Fetch the list of prime sets from API."""
     url = "https://api.warframe.market/v2/items"
+    response = requests_module.get(url, timeout=30)
     
-    try:
-        # First API call to get all items (not rate limited as it's just one call)
-        response = requests.get(url, timeout=30)
-        
-        if response.status_code == 200:
-            data = response.json()
-            items = data.get("data", [])
-            
-            # Filter for items ending with 'prime_set'
-            prime_sets = []
-            for item in items:
-                slug = item.get('slug', '')
-                if slug.endswith('_prime_set'):
-                    prime_sets.append(item)
-            
-            if not prime_sets:
-                print("No Prime sets found.")
-                return
-            
-            # Calculate hash of prime_sets array
-            current_hash = calculate_hash(prime_sets)
-            cached_hash = cache.get('prime_sets_hash', '')
-            
-            # Check if data has changed
-            if current_hash == cached_hash and 'detailed_sets' in cache:
-                print("Data unchanged since last fetch. Using cached data...")
-                print(f"\nUsing cached data for {len(prime_sets)} Prime Sets.\n")
-                print("=" * 80)
-                
-                # Display cached data
-                detailed_sets = cache['detailed_sets']
-                for i, set_data in enumerate(detailed_sets, 1):
-                    print(f"\n{i:2d}. {set_data['name']} [{set_data['id']}]")
-                    
-                    if set_data.get('setParts'):
-                        print("    Parts:")
-                        for part in set_data['setParts']:
-                            print(f"      - {part['name']} [{part['code']}] (Quantity: {part['quantityInSet']})")
-                    else:
-                        print("    No individual parts found.")
-                    
-                    print()
-                
-                print("=" * 80)
-                print(f"Total Prime Sets processed: {len(detailed_sets)}")
-                print("Data loaded from cache (1 API call instead of many!)")
-                
-                # Fetch pricing data using cached information
-                print("\n" + "=" * 80)
-                print("FETCHING REAL-TIME PRICING DATA")
-                print("=" * 80)
-                
-                # Fetch set lowest prices
-                set_prices = fetch_set_lowest_prices(cache, requests, rate_limiter)
-                
-                # Fetch part lowest prices
-                part_prices = fetch_part_lowest_prices(cache, requests, rate_limiter)
-                
-                # Fetch 48-hour volume data
-                volume_result = fetch_set_volume(cache, requests, rate_limiter)
-                total_volume = volume_result.get('total', 0) if isinstance(volume_result, dict) else volume_result
-                
-                # Display pricing summary
-                display_pricing_summary(set_prices, part_prices, total_volume=total_volume)
-                
-                # Perform profitability analysis
-                print("\n" + "=" * 80)
-                print("PROFITABILITY ANALYSIS")
-                print("=" * 80)
-                
-                # Get cached detailed sets
-                detailed_sets = cache['detailed_sets']
-                
-                # Calculate profit margins
-                profit_data = calculate_profit_margins(set_prices, part_prices, detailed_sets)
-                
-                if profit_data:
-                    # Get user weights for scoring
-                    profit_weight, volume_weight = get_user_weights()
-                    
-                    # Calculate profitability scores
-                    scored_data = calculate_profitability_scores(profit_data, volume_result, profit_weight, volume_weight)
-                    
-                    # Display top profitable sets
-                    display_top_profitable_sets(scored_data)
-                else:
-                    print("No profitable sets found for analysis.")
-                return
-            
-            # Data has changed or no cache exists, fetch fresh data
-            print(f"\nData changed or cache missing. Fetching detailed information for {len(prime_sets)} Prime Sets...\n")
-            print("Rate limited to 3 requests per second for API safety.")
-            print("=" * 80)
-            
-            # Sort alphabetically
-            prime_sets.sort(key=lambda x: x.get('i18n', {}).get('en', {}).get('name', x.get('slug', '')))
-            
-            # Store detailed information for caching
-            detailed_sets = []
-            
-            # Fetch details for each set with rate limiting
-            for i, item in enumerate(prime_sets, 1):
-                slug = item.get('slug', '')
-                
-                print(f"Fetching details for set {i}/{len(prime_sets)}: {slug}")
-                
-                set_details = fetch_set_details(slug, requests, rate_limiter)
-                
-                if set_details:
-                    # Fetch part quantities and store complete information
-                    parts_with_quantities = []
-                    for part_code in set_details['setParts']:
-                        # Fetch quantity information for each part
-                        part_info = fetch_part_quantity(part_code, requests, rate_limiter)
-                        parts_with_quantities.append(part_info)
-                    
-                    # Create complete set data for caching
-                    complete_set_data = {
-                        'id': set_details['id'],
-                        'name': set_details['name'],
-                        'slug': slug,  # Store original slug for pricing API
-                        'setParts': parts_with_quantities
-                    }
-                    detailed_sets.append(complete_set_data)
-                    
-                    # Display set information
-                    print(f"\n{i:2d}. {set_details['name']} [{set_details['id']}]")
-                    
-                    if parts_with_quantities:
-                        print("    Parts:")
-                        for part_info in parts_with_quantities:
-                            print(f"      - {part_info['name']} [{part_info['code']}] (Quantity: {part_info['quantityInSet']})")
-                    else:
-                        print("    No individual parts found.")
-                    
-                    print()
-                else:
-                    # Fallback display if details couldn't be fetched
-                    i18n = item.get('i18n', {})
-                    en_info = i18n.get('en', {})
-                    name = en_info.get('name', slug.replace('_', ' ').title())
-                    fallback_data = {
-                        'id': '',
-                        'name': name,
-                        'slug': slug,  # Store original slug even for fallback
-                        'setParts': []
-                    }
-                    detailed_sets.append(fallback_data)
-                    print(f"\n{i:2d}. {name} [Details unavailable]")
-                    print()
-            
-            # Update cache with new data
-            cache_data = {
-                'prime_sets_hash': current_hash,
-                'detailed_sets': detailed_sets,
-                'last_updated': time.time()
-            }
-            save_cache(cache_data)
-            
-            print("=" * 80)
-            print(f"Total Prime Sets processed: {len(detailed_sets)}")
-            print("Note: Processing time will vary based on number of parts per set.")
-            print("Each set requires 1 API call + 1 additional call per part (rate limited to 3 req/sec)")
-            print("Data cached for future use - next run will be much faster if data unchanged!")
-            
-            # After caching, fetch pricing data using the fresh cache
-            print("\n" + "=" * 80)
-            print("FETCHING REAL-TIME PRICING DATA")
-            print("=" * 80)
-            
-            # Fetch set lowest prices
-            set_prices = fetch_set_lowest_prices(cache_data, requests, rate_limiter)
-            
-            # Fetch part lowest prices
-            part_prices = fetch_part_lowest_prices(cache_data, requests, rate_limiter)
-            
-            # Fetch 48-hour volume data
-            volume_result = fetch_set_volume(cache_data, requests, rate_limiter)
-            total_volume = volume_result.get('total', 0) if isinstance(volume_result, dict) else volume_result
-            
-            # Display pricing summary
-            display_pricing_summary(set_prices, part_prices, total_volume=total_volume)
-            
-            # Perform profitability analysis
-            print("\n" + "=" * 80)
-            print("PROFITABILITY ANALYSIS")
-            print("=" * 80)
-            
-            # Calculate profit margins
-            profit_data = calculate_profit_margins(set_prices, part_prices, detailed_sets)
-            
-            if profit_data:
-                # Get user weights for scoring
-                profit_weight, volume_weight = get_user_weights()
-                
-                # Calculate profitability scores
-                scored_data = calculate_profitability_scores(profit_data, volume_result, profit_weight, volume_weight)
-                
-                # Display top profitable sets
-                display_top_profitable_sets(scored_data)
-            else:
-                print("No profitable sets found for analysis.")
-            
+    if response.status_code != 200:
+        raise Exception(f"API Error {response.status_code}: {response.text}")
+    
+    data = response.json()
+    items = data.get("data", [])
+    
+    # Filter for items ending with 'prime_set'
+    prime_sets = [item for item in items if item.get('slug', '').endswith('_prime_set')]
+    
+    if not prime_sets:
+        raise Exception("No Prime sets found.")
+    
+    return prime_sets
+
+def _process_cached_data(cache, prime_sets, requests_module, rate_limiter, console, user_weights):
+    """Process cached data if available and unchanged."""
+    current_hash = calculate_hash(prime_sets)
+    cached_hash = cache.get('prime_sets_hash', '')
+    
+    if current_hash != cached_hash or 'detailed_sets' not in cache:
+        return None  # Need fresh data
+    
+    _show_status_message(console, "Data unchanged since last fetch. Using cached data...")
+    _display_cached_sets(cache['detailed_sets'])
+    
+    # Fetch current pricing and analyze
+    return _perform_analysis_with_data(cache, requests_module, rate_limiter, console, user_weights)
+
+def _display_cached_sets(detailed_sets):
+    """Display cached sets information."""
+    print(f"\nUsing cached data for {len(detailed_sets)} Prime Sets.\n")
+    print("=" * 80)
+    
+    for i, set_data in enumerate(detailed_sets, 1):
+        print(f"\n{i:2d}. {set_data['name']} [{set_data['id']}]")
+        if set_data.get('setParts'):
+            print("    Parts:")
+            for part in set_data['setParts']:
+                print(f"      - {part['name']} [{part['code']}] (Quantity: {part['quantityInSet']})")
         else:
-            print(f"Error {response.status_code}: {response.text}")
-            
+            print("    No individual parts found.")
+        print()
+    
+    print("=" * 80)
+    print(f"Total Prime Sets processed: {len(detailed_sets)}")
+    print("Data loaded from cache (1 API call instead of many!)")
+
+def _perform_analysis_with_data(cache, requests_module, rate_limiter, console, user_weights):
+    """Perform analysis with cached or fresh data."""
+    print("\n" + "=" * 80)
+    print("FETCHING REAL-TIME PRICING DATA")
+    print("=" * 80)
+    
+    # Fetch pricing data
+    set_prices = fetch_set_lowest_prices(cache, requests_module, rate_limiter)
+    part_prices = fetch_part_lowest_prices(cache, requests_module, rate_limiter)
+    volume_result = fetch_set_volume(cache, requests_module, rate_limiter)
+    
+    total_volume = volume_result.get('total', 0) if isinstance(volume_result, dict) else volume_result
+    display_pricing_summary(set_prices, part_prices, total_volume=total_volume)
+    
+    print("\n" + "=" * 80)
+    print("PROFITABILITY ANALYSIS")
+    print("=" * 80)
+    
+    detailed_sets = cache['detailed_sets']
+    profit_data = calculate_profit_margins(set_prices, part_prices, detailed_sets)
+    
+    if not profit_data:
+        if console and RICH_AVAILABLE:
+            console.print("[red]No profitable sets found for analysis.[/red]")
+        else:
+            print("No profitable sets found for analysis.")
+        return None, user_weights
+    
+    # Get weights if not provided
+    if user_weights:
+        profit_weight, volume_weight = user_weights
+    else:
+        if console and RICH_AVAILABLE:
+            profit_weight, volume_weight = get_cli_weights(console)
+        else:
+            profit_weight, volume_weight = get_user_weights()
+    
+    # Calculate and return results
+    scored_data = calculate_profitability_scores(profit_data, volume_result, profit_weight, volume_weight)
+    return scored_data, (profit_weight, volume_weight)
+
+def run_analysis(console=None, user_weights=None):
+    """Run the core analysis logic."""
+    try:
+        requests_module, rate_limiter = _initialize_analysis_dependencies()
+        cache = load_cache()
+        
+        _show_status_message(console, "Fetching Prime sets from Warframe Market API...")
+        prime_sets = _fetch_prime_sets_list(requests_module)
+        
+        # Try to use cached data first
+        result = _process_cached_data(cache, prime_sets, requests_module, rate_limiter, console, user_weights)
+        if result:
+            return result
+        
+        # Need fresh data - continue with original logic for now
+        return _fetch_fresh_data_and_analyze(prime_sets, cache, requests_module, rate_limiter, console, user_weights)
+        
     except Exception as e:
-        print(f"Error: {e}")
+        if console and RICH_AVAILABLE:
+            console.print(f"[red]Error: {e}[/red]")
+        else:
+            print(f"Error: {e}")
+        return None, user_weights
+
+def _fetch_fresh_data_and_analyze(prime_sets, cache, requests_module, rate_limiter, console, user_weights):
+    """Fetch fresh data when cache is outdated."""
+    print(f"\nData changed or cache missing. Fetching detailed information for {len(prime_sets)} Prime Sets...\n")
+    print("Rate limited to 3 requests per second for API safety.")
+    print("=" * 80)
+    
+    # Sort alphabetically
+    prime_sets.sort(key=lambda x: x.get('i18n', {}).get('en', {}).get('name', x.get('slug', '')))
+    
+    # Fetch detailed set information
+    detailed_sets = []
+    for i, item in enumerate(prime_sets, 1):
+        slug = item.get('slug', '')
+        print(f"Fetching details for set {i}/{len(prime_sets)}: {slug}")
+        
+        set_details = fetch_set_details(slug, requests_module, rate_limiter)
+        
+        if set_details:
+            # Fetch part quantities and store complete information
+            parts_with_quantities = []
+            for part_code in set_details['setParts']:
+                part_info = fetch_part_quantity(part_code, requests_module, rate_limiter)
+                parts_with_quantities.append(part_info)
+            
+            complete_set_data = {
+                'id': set_details['id'],
+                'name': set_details['name'],
+                'slug': slug,
+                'setParts': parts_with_quantities
+            }
+            detailed_sets.append(complete_set_data)
+            
+            print(f"\n{i:2d}. {set_details['name']} [{set_details['id']}]")
+            if parts_with_quantities:
+                print("    Parts:")
+                for part_info in parts_with_quantities:
+                    print(f"      - {part_info['name']} [{part_info['code']}] (Quantity: {part_info['quantityInSet']})")
+            else:
+                print("    No individual parts found.")
+            print()
+        else:
+            # Fallback for unavailable details
+            i18n = item.get('i18n', {})
+            en_info = i18n.get('en', {})
+            name = en_info.get('name', slug.replace('_', ' ').title())
+            fallback_data = {
+                'id': '',
+                'name': name,
+                'slug': slug,
+                'setParts': []
+            }
+            detailed_sets.append(fallback_data)
+            print(f"\n{i:2d}. {name} [Details unavailable]")
+            print()
+    
+    # Update cache
+    current_hash = calculate_hash(prime_sets)
+    cache_data = {
+        'prime_sets_hash': current_hash,
+        'detailed_sets': detailed_sets,
+        'last_updated': time.time()
+    }
+    save_cache(cache_data)
+    
+    print("=" * 80)
+    print(f"Total Prime Sets processed: {len(detailed_sets)}")
+    print("Note: Processing time will vary based on number of parts per set.")
+    print("Each set requires 1 API call + 1 additional call per part (rate limited to 3 req/sec)")
+    print("Data cached for future use - next run will be much faster if data unchanged!")
+    
+    # Perform analysis with fresh data
+    return _perform_analysis_with_data(cache_data, requests_module, rate_limiter, console, user_weights)
+
+def get_prime_sets():
+    """Legacy wrapper function for backwards compatibility."""
+    console = Console() if RICH_AVAILABLE else None
+    main_cli_loop(console)
+
+def main_cli_loop(console=None):
+    """Main CLI loop with menu system."""
+    if console and RICH_AVAILABLE:
+        console.clear()
+        show_ascii_banner(console)
+    
+    current_data = None
+    current_weights = None
+    
+    while True:
+        try:
+            if console and RICH_AVAILABLE:
+                if current_data is None:
+                    # First run - get weights and run analysis
+                    console.print("[bold yellow]Welcome to Warframe Market Set Profit Analyzer![/bold yellow]")
+                    console.print("")
+                    current_weights = get_cli_weights(console, current_weights)
+                    
+                    console.print("")
+                    console.print("[bold green]Starting analysis...[/bold green]")
+                    console.print("")
+                    
+                    # Run analysis with selected weights
+                    current_data, current_weights = run_analysis(console, current_weights)
+                    
+                    if current_data:
+                        # Display results with pagination
+                        display_paginated_results(console, current_data)
+                        
+                        # Show post-analysis menu
+                        choice = show_post_analysis_menu(console)
+                    else:
+                        console.print("[red]Analysis failed or no data available.[/red]")
+                        choice = 3  # Quit
+                else:
+                    # Show post-analysis menu for subsequent runs
+                    choice = show_post_analysis_menu(console)
+            else:
+                # Fallback for when Rich is not available
+                if current_data is None:
+                    print("\nWarframe Market Set Profit Analyzer")
+                    print("="*50)
+                    current_weights = get_user_weights() if not current_weights else current_weights
+                    current_data, current_weights = run_analysis(None, current_weights)
+                    
+                    if current_data:
+                        display_top_profitable_sets(current_data)
+                        choice = show_fallback_menu()
+                    else:
+                        print("Analysis failed or no data available.")
+                        choice = 3
+                else:
+                    choice = show_fallback_menu()
+            
+            # Handle menu choice
+            if choice == 1:  # Run analysis again
+                if console and RICH_AVAILABLE:
+                    console.clear()
+                    show_ascii_banner(console)
+                    console.print("[bold cyan]Running fresh analysis...[/bold cyan]")
+                    console.print("")
+                    
+                    # Get weights (with option to use previous)
+                    current_weights = get_cli_weights(console, current_weights)
+                    
+                    # Run analysis
+                    current_data, current_weights = run_analysis(console, current_weights)
+                    
+                    if current_data:
+                        display_paginated_results(console, current_data)
+                    else:
+                        console.print("[red]Analysis failed.[/red]")
+                else:
+                    print("\nRunning fresh analysis...")
+                    current_weights = get_user_weights()
+                    current_data, current_weights = run_analysis(None, current_weights)
+                    if current_data:
+                        display_top_profitable_sets(current_data)
+                    
+            elif choice == 2:  # Try different weights
+                if current_data:
+                    if console and RICH_AVAILABLE:
+                        console.clear()
+                        show_ascii_banner(console)
+                        console.print("[bold green]Trying different weights with current data...[/bold green]")
+                        console.print("")
+                        
+                        # Get new weights
+                        new_weights = get_cli_weights(console, current_weights)
+                        
+                        # Re-calculate scores with new weights (need to implement this)
+                        rescored_data = recalculate_scores_with_new_weights(current_data, new_weights, current_weights)
+                        current_weights = new_weights
+                        current_data = rescored_data
+                        
+                        display_paginated_results(console, current_data)
+                    else:
+                        print("\nTrying different weights...")
+                        new_weights = get_user_weights()
+                        rescored_data = recalculate_scores_with_new_weights(current_data, new_weights, current_weights)
+                        current_weights = new_weights
+                        current_data = rescored_data
+                        display_top_profitable_sets(current_data)
+                else:
+                    if console and RICH_AVAILABLE:
+                        console.print("[yellow]No current data available. Please run analysis first.[/yellow]")
+                    else:
+                        print("No current data available. Please run analysis first.")
+                        
+            elif choice == 3:  # Quit
+                if console and RICH_AVAILABLE:
+                    console.print("")
+                    console.print("[bold cyan]Thanks for using Warframe Market Set Profit Analyzer![/bold cyan]")
+                    console.print("[dim]Happy trading, Tenno![/dim]")
+                else:
+                    print("\nThanks for using Warframe Market Set Profit Analyzer!")
+                    print("Happy trading, Tenno!")
+                break
+                
+        except KeyboardInterrupt:
+            if console and RICH_AVAILABLE:
+                console.print("\n[yellow]Operation cancelled by user.[/yellow]")
+            else:
+                print("\nOperation cancelled by user.")
+            break
+        except Exception as e:
+            if console and RICH_AVAILABLE:
+                console.print(f"[red]Unexpected error: {e}[/red]")
+            else:
+                print(f"Unexpected error: {e}")
+            break
+
+def recalculate_scores_with_new_weights(scored_data, new_weights, old_weights):
+    """Recalculate profitability scores with new weights."""
+    if not scored_data:
+        return scored_data
+    
+    new_profit_weight, new_volume_weight = new_weights
+    old_profit_weight, old_volume_weight = old_weights
+    
+    # Create new scored data list
+    rescored_data = []
+    
+    for item in scored_data:
+        # Extract normalized values (reverse engineer from old score)
+        old_total_score = item['total_score']
+        
+        # For simplicity, we'll extract the raw profit and volume values
+        # and renormalize everything (this is more accurate than trying to reverse-engineer)
+        rescored_data.append(item.copy())
+    
+    # Extract all profit margins and volumes for renormalization
+    profit_margins = [item['profit_margin'] for item in rescored_data]
+    volumes = [item.get('volume', 0) for item in rescored_data]
+    
+    # Normalize values
+    normalized_profits = normalize_data(profit_margins)
+    normalized_volumes = normalize_data(volumes)
+    
+    # Recalculate scores with new weights
+    for i, item in enumerate(rescored_data):
+        normalized_profit = normalized_profits[i] if normalized_profits else 0
+        normalized_volume = normalized_volumes[i] if normalized_volumes else 0
+        
+        # Calculate new weighted score
+        total_score = (normalized_profit * new_profit_weight) + (normalized_volume * new_volume_weight)
+        item['total_score'] = total_score
+    
+    # Re-sort by new scores
+    rescored_data.sort(key=lambda x: x['total_score'], reverse=True)
+    
+    return rescored_data
 
 def main():
     """Main function to handle script execution."""
     if len(sys.argv) > 1 and sys.argv[1] == "--venv-active":
-        get_prime_sets()
+        console = Console() if RICH_AVAILABLE else None
+        main_cli_loop(console)
     else:
         activate_venv_and_run()
 
