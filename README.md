@@ -11,6 +11,7 @@ A comprehensive tool for analyzing Prime set profitability in Warframe using rea
 - **Live Pricing Data**: Fetches current lowest prices for Prime sets and individual parts
 - **48-Hour Volume Analysis**: Trading volume data to identify active vs. stagnant markets
 - **Comprehensive Market Coverage**: Analyzes all available Prime sets automatically
+- **Historical Data Tracking**: SQL database tracks profit and price trends over time
 
 ### 💰 **Advanced Profitability Calculations** 
 - **Profit Margin Analysis**: Set price vs. sum of individual part costs
@@ -24,11 +25,18 @@ A comprehensive tool for analyzing Prime set profitability in Warframe using rea
 - **Interactive Configuration**: User-defined weights (default: Profit=1.0×, Volume=1.2×)
 - **Top 10 Rankings**: Quickly identify the most profitable opportunities
 
+### 🗄️ **Data Persistence & Export**
+- **SQLite Database**: Transaction-safe storage of all analysis runs
+- **JSON Export**: Export historical data in LLM-friendly format for analysis
+- **Trend Analysis**: Track profit margins and prices over time
+- **Data Integrity**: Only complete runs saved - no partial/corrupted data
+
 ### 🚀 **Performance & Reliability**
 - **Smart Caching System**: SHA-256 hash-based cache invalidation reduces API calls by 95%+
 - **Rate Limiting**: Respects API limits with automatic throttling (3 requests/second)
 - **Retry Logic**: Exponential backoff for network reliability
 - **Graceful Error Handling**: Continues operation even with partial data failures
+- **Thread-Safe Operations**: Safe concurrent database access
 
 ### 🛠️ **Zero-Configuration Setup**
 - **Automatic Environment Management**: Creates and manages Python virtual environment
@@ -55,10 +63,18 @@ A comprehensive tool for analyzing Prime set profitability in Warframe using rea
    python main.py
    ```
 
-That's it! The application will automatically:
+The application will show you a menu:
+```
+1. Start Market Analysis  - Run analysis and save results to database
+2. Export Database to JSON - Export historical data for trend analysis  
+3. Exit Application
+```
+
+The application will automatically:
 - Create a virtual environment if needed
-- Install dependencies (`requests==2.31.0`)
+- Install dependencies (`requests==2.31.0`, `rich`)
 - Fetch and analyze all Prime set data
+- Save results to SQLite database (`cache/market_runs.sqlite`)
 - Display comprehensive profitability analysis
 
 ### First Run vs. Subsequent Runs
@@ -67,11 +83,20 @@ That's it! The application will automatically:
 - Fetches complete Prime set data from Warframe Market API
 - Builds comprehensive cache with part quantities and relationships
 - Performs full market analysis
+- Creates SQLite database and saves results
 
 **Subsequent Runs** (~30-60 seconds):
 - Uses cached set data (only refetches if data has changed)
 - Fetches only real-time pricing and volume data
+- Saves new analysis to database for trend tracking
 - Provides same comprehensive analysis with much faster execution
+
+### Data Export & Analysis
+Use the **Export Database to JSON** option to:
+- Export all historical market runs to `cache/market_data_export.json`
+- Analyze profit and price trends over time
+- Perform advanced analysis with external tools (Excel, Python, etc.)
+- Share data in a structured, LLM-friendly format
 
 ## 📋 Sample Output
 
@@ -132,17 +157,28 @@ Enter choice (1-2):
 
 ```
 Warframe-Market-Set-Profit-Analyzer/
-├── main.py              # Main application with all functionality
-├── requirements.txt     # Python dependencies (requests==2.31.0)
-├── cache/              # Cached data directory
+├── main.py              # Main application with CLI and analysis logic
+├── database.py          # SQLite database module (transaction-safe)
+├── requirements.txt     # Python dependencies (requests==2.31.0, rich)
+├── cache/              # Data storage directory
 │   ├── .gitkeep        # Preserves directory structure
-│   └── prime_sets_cache.json  # Generated cache file
+│   ├── prime_sets_cache.json     # API response cache (auto-generated)
+│   ├── market_runs.sqlite        # SQLite database (auto-generated)
+│   └── market_data_export.json   # JSON export file (user-generated)
 ├── venv/               # Auto-generated virtual environment
 ├── LICENSE             # MIT License
 ├── README.md           # This file
-├── CONTRIBUTING.md     # Contribution guidelines
+├── CONTRIBUTING.md     # Contribution guidelines with database examples
 └── CLAUDE.md           # Claude Code development guidance
 ```
+
+### Database Schema
+The SQLite database (`cache/market_runs.sqlite`) stores:
+- **market_runs**: Metadata for each analysis run (timestamp, date)
+- **set_profits**: Profit margins and lowest prices for each Prime set
+- **Indexes**: Optimized for fast queries on timestamps and set names
+
+**Note**: Database files are git-ignored to keep personal analysis data private.
 
 ## 🔧 Technical Details
 
@@ -169,6 +205,7 @@ The application uses SHA-256 hash-based cache invalidation:
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 Key areas for contribution:
+- **Database Extensions**: Advanced analytics, custom export formats
 - **New Analysis Features**: Additional metrics, scoring algorithms
 - **Performance Optimizations**: Async processing, improved caching
 - **UI Improvements**: Better console output, progress indicators
