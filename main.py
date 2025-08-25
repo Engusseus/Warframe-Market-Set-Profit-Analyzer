@@ -7,6 +7,7 @@ import hashlib
 import json
 import statistics
 from collections import deque
+from database import get_database_instance
 
 try:
     from rich.console import Console
@@ -1269,6 +1270,35 @@ def _perform_analysis_with_data(cache, requests_module, rate_limiter, console, u
     
     # Calculate and return results
     scored_data = calculate_profitability_scores(profit_data, volume_result, profit_weight, volume_weight)
+    
+    # Save to database (transaction-safe - only saves if complete)
+    try:
+        if profit_data and set_prices:
+            db = get_database_instance()
+            run_id = db.save_market_run(profit_data, set_prices)
+            
+            if console and RICH_AVAILABLE:
+                console.print(f"[dim]Market run saved to database (ID: {run_id})[/dim]")
+            else:
+                print(f"Market run saved to database (ID: {run_id})")
+        else:
+            if console and RICH_AVAILABLE:
+                console.print("[yellow]Warning: No data available to save to database[/yellow]")
+            else:
+                print("Warning: No data available to save to database")
+    except ValueError as e:
+        # Input validation errors
+        if console and RICH_AVAILABLE:
+            console.print(f"[yellow]Warning: Invalid data format for database: {e}[/yellow]")
+        else:
+            print(f"Warning: Invalid data format for database: {e}")
+    except Exception as e:
+        # Database operation errors
+        if console and RICH_AVAILABLE:
+            console.print(f"[red]Error: Could not save to database: {e}[/red]")
+        else:
+            print(f"Error: Could not save to database: {e}")
+    
     return scored_data, (profit_weight, volume_weight)
 
 def run_analysis(console=None, user_weights=None):
@@ -1384,46 +1414,64 @@ def main_cli_loop(console=None):
     
     while True:
         try:
-            if console and RICH_AVAILABLE:
-                if current_data is None:
-                    # First run - get weights and run analysis
-                    console.print("[bold yellow]Welcome to Warframe Market Set Profit Analyzer![/bold yellow]")
-                    console.print("")
-                    current_weights = get_cli_weights(console, current_weights)
-                    
-                    console.print("")
-                    console.print("[bold green]Starting analysis...[/bold green]")
-                    console.print("")
-                    
-                    # Run analysis with selected weights
-                    current_data, current_weights = run_analysis(console, current_weights)
-                    
-                    if current_data:
-                        # Display results with pagination
-                        display_paginated_results(console, current_data)
-                        
-                        # Show post-analysis menu
-                        choice = show_post_analysis_menu(console)
-                    else:
-                        console.print("[red]Analysis failed or no data available.[/red]")
-                        choice = 3  # Quit
+            # Show startup menu first
+            if current_data is None:
+                if console and RICH_AVAILABLE:
+                    startup_choice = show_startup_menu(console)
                 else:
-                    # Show post-analysis menu for subsequent runs
-                    choice = show_post_analysis_menu(console)
-            else:
-                # Fallback for when Rich is not available
-                if current_data is None:
-                    print("\nWarframe Market Set Profit Analyzer")
-                    print("="*50)
-                    current_weights = get_user_weights() if not current_weights else current_weights
-                    current_data, current_weights = run_analysis(None, current_weights)
-                    
-                    if current_data:
-                        display_top_profitable_sets(current_data)
-                        choice = show_fallback_menu()
+                    startup_choice = show_fallback_startup_menu()
+                
+                if startup_choice == 1:  # Start Analysis
+                    if console and RICH_AVAILABLE:
+                        console.clear()
+                        show_ascii_banner(console)
+                        console.print("[bold yellow]Starting Market Analysis...[/bold yellow]")
+                        console.print("")
+                        current_weights = get_cli_weights(console, current_weights)
+                        
+                        console.print("")
+                        console.print("[bold green]Running analysis...[/bold green]")
+                        console.print("")
+                        
+                        # Run analysis with selected weights
+                        current_data, current_weights = run_analysis(console, current_weights)
+                        
+                        if current_data:
+                            # Display results with pagination
+                            display_paginated_results(console, current_data)
+                            
+                            # Show post-analysis menu
+                            choice = show_post_analysis_menu(console)
+                        else:
+                            console.print("[red]Analysis failed or no data available.[/red]")
+                            choice = 3  # Quit
                     else:
-                        print("Analysis failed or no data available.")
-                        choice = 3
+                        # Fallback for when Rich is not available
+                        print("\nStarting Market Analysis...")
+                        print("="*50)
+                        current_weights = get_user_weights() if not current_weights else current_weights
+                        current_data, current_weights = run_analysis(None, current_weights)
+                        
+                        if current_data:
+                            display_top_profitable_sets(current_data)
+                            choice = show_fallback_menu()
+                        else:
+                            print("Analysis failed or no data available.")
+                            choice = 3
+                elif startup_choice == 2:  # Export JSON
+                    handle_json_export(console)
+                    if console and RICH_AVAILABLE:
+                        console.print("\n[dim]Press Enter to continue...[/dim]")
+                        console.input()
+                    else:
+                        input("\nPress Enter to continue...")
+                    continue  # Go back to startup menu
+                elif startup_choice == 3:  # Exit
+                    break
+            else:
+                # Show post-analysis menu for subsequent runs
+                if console and RICH_AVAILABLE:
+                    choice = show_post_analysis_menu(console)
                 else:
                     choice = show_fallback_menu()
             
@@ -1545,6 +1593,128 @@ def recalculate_scores_with_new_weights(scored_data, new_weights, old_weights):
     rescored_data.sort(key=lambda x: x['total_score'], reverse=True)
     
     return rescored_data
+
+def show_startup_menu(console):
+    """Show startup menu with export option."""
+    if not RICH_AVAILABLE:
+        return show_fallback_startup_menu()
+    
+    console.print(Rule("WELCOME TO WARFRAME MARKET ANALYZER", style="bold yellow"))
+    console.print("")
+    
+    # Show database stats if available
+    try:
+        db = get_database_instance()
+        stats = db.get_database_stats()
+        
+        if stats['total_runs'] > 0:
+            info_panel = Panel(
+                f"[cyan]Database Stats:[/cyan]\n"
+                f"• Total Runs: {stats['total_runs']}\n"
+                f"• Total Records: {stats['total_profit_records']}\n"
+                f"• Last Run: {stats.get('last_run', 'Unknown')}\n"
+                f"• Database Size: {stats['database_size_bytes'] / 1024:.1f} KB",
+                title="Historical Data Available",
+                border_style="blue"
+            )
+            console.print(info_panel)
+            console.print("")
+    except Exception:
+        pass
+    
+    menu_panel = Panel(
+        "[1] [bold green]Start Market Analysis[/bold green]\n"
+        "    Analyze current market data and save to database\n\n"
+        "[2] [bold cyan]Export Database to JSON[/bold cyan]\n"
+        "    Export all historical data for analysis\n\n"
+        "[3] [bold red]Exit Application[/bold red]\n"
+        "    Exit the program",
+        title="Main Menu",
+        border_style="blue"
+    )
+    console.print(menu_panel)
+    
+    choice = Prompt.ask(
+        "Select option",
+        choices=["1", "2", "3"],
+        default="1"
+    )
+    
+    return int(choice)
+
+def show_fallback_startup_menu():
+    """Fallback startup menu when Rich is not available."""
+    print("\n" + "="*60)
+    print("WARFRAME MARKET SET PROFIT ANALYZER")
+    print("="*60)
+    print("1. Start Market Analysis")
+    print("2. Export Database to JSON")
+    print("3. Exit Application")
+    print("="*60)
+    
+    while True:
+        try:
+            choice = input("Select option (1-3): ").strip()
+            if choice in ["1", "2", "3"]:
+                return int(choice)
+            print("Invalid choice. Please enter 1, 2, or 3.")
+        except (ValueError, KeyboardInterrupt):
+            return 3
+
+def handle_json_export(console):
+    """Handle JSON export functionality."""
+    try:
+        db = get_database_instance()
+        stats = db.get_database_stats()
+        
+        if stats['total_runs'] == 0:
+            if console and RICH_AVAILABLE:
+                console.print("[yellow]No market data available to export. Run an analysis first.[/yellow]")
+            else:
+                print("No market data available to export. Run an analysis first.")
+            return
+        
+        if console and RICH_AVAILABLE:
+            console.print(f"[cyan]Exporting {stats['total_runs']} market runs with {stats['total_profit_records']} profit records...[/cyan]")
+        else:
+            print(f"Exporting {stats['total_runs']} market runs with {stats['total_profit_records']} profit records...")
+        
+        output_path = db.save_json_export()
+        
+        # Verify export was successful
+        if not os.path.exists(output_path):
+            raise FileNotFoundError(f"Export file was not created at {output_path}")
+        
+        file_size_kb = os.path.getsize(output_path) / 1024
+        
+        if console and RICH_AVAILABLE:
+            console.print(f"[bold green]Export completed successfully![/bold green]")
+            console.print(f"[dim]File saved to: {output_path}[/dim]")
+            console.print(f"[dim]File size: {file_size_kb:.1f} KB[/dim]")
+        else:
+            print(f"Export completed successfully!")
+            print(f"File saved to: {output_path}")
+            print(f"File size: {file_size_kb:.1f} KB")
+            
+    except PermissionError as e:
+        if console and RICH_AVAILABLE:
+            console.print(f"[red]Export failed: Permission denied. Check file permissions.[/red]")
+            console.print(f"[dim]Details: {e}[/dim]")
+        else:
+            print(f"Export failed: Permission denied. Check file permissions.")
+            print(f"Details: {e}")
+    except OSError as e:
+        if console and RICH_AVAILABLE:
+            console.print(f"[red]Export failed: File system error.[/red]")
+            console.print(f"[dim]Details: {e}[/dim]")
+        else:
+            print(f"Export failed: File system error.")
+            print(f"Details: {e}")
+    except Exception as e:
+        if console and RICH_AVAILABLE:
+            console.print(f"[red]Export failed: {e}[/red]")
+        else:
+            print(f"Export failed: {e}")
 
 def main():
     """Main function to handle script execution."""

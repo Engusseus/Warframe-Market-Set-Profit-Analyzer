@@ -63,12 +63,21 @@ Data Processing Layer
 Presentation Layer
 ├── display_* functions    # Output formatting
 ├── get_user_weights()     # User interaction
+├── show_startup_menu()    # Menu system
 └── main execution flow    # Orchestration
 
 Storage Layer
 ├── load_cache()          # Data persistence
 ├── save_cache()          # Cache management
-└── Cache invalidation    # Performance optimization
+├── database.py           # SQL persistence module
+└── MarketDatabase        # Transaction-safe data storage
+
+Database Module (database.py)
+├── MarketDatabase        # Main database class
+├── save_market_run()     # Transaction-safe saving
+├── export_to_json()      # Data export functionality
+├── get_database_stats()  # Database monitoring
+└── Thread-safe operations # Concurrent access support
 ```
 
 ### Adding New Modules
@@ -180,7 +189,22 @@ class AlternativeDataFetcher:
         # Allows easy switching between data sources
 ```
 
-#### 4. **Export/Import Modules**
+#### 4. **Database Extensions**
+Extend the database module with new capabilities:
+
+```python
+def add_database_analytics(db_instance):
+    """Add analytics functions to database operations."""
+    # Extend existing database functionality
+    # Follow transaction-safe patterns
+    
+def create_custom_export_format(export_data, format_type):
+    """Add new export formats to database module."""
+    # Build on existing JSON export foundation
+    # Maintain consistent data structure
+```
+
+#### 5. **Export/Import Modules**
 Add modular data export capabilities:
 
 ```python
@@ -189,8 +213,8 @@ def export_to_csv(analysis_data, filename):
     # Single purpose: CSV export
     # No dependencies on display or calculation logic
 
-def export_to_json(analysis_data, filename):
-    """Export analysis results to JSON format."""
+def export_to_excel(analysis_data, filename):
+    """Export analysis results to Excel format."""
     # Parallel module with same interface pattern
 ```
 

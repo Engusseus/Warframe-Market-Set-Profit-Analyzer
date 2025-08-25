@@ -63,6 +63,11 @@ venv.bak/
 # Cache files (exclude personal cache data but keep folder structure)
 cache/*.json
 cache/*.cache
+cache/*.sqlite
+cache/*_export.json
+
+# Database files (personal analysis data)
+*.sqlite
 
 # OS generated files
 .DS_Store
