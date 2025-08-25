@@ -57,7 +57,7 @@ A comprehensive tool for analyzing Prime set profitability in Warframe using rea
 
 That's it! The application will automatically:
 - Create a virtual environment if needed
-- Install dependencies (`requests`)
+- Install dependencies (`requests==2.31.0`)
 - Fetch and analyze all Prime set data
 - Display comprehensive profitability analysis
 
