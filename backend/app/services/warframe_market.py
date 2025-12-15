@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 from ..config import get_settings
+from ..core.logging import get_logger
 from ..core.rate_limiter import RateLimiter
 
 
@@ -65,34 +66,58 @@ class WarframeMarketService:
         Returns:
             Response or None if all retries failed
         """
+        logger = get_logger()
         client = await self._get_client()
 
         for attempt in range(max_retries):
             try:
                 await self.rate_limiter.wait_if_needed()
+                logger.debug(f"Fetching: {url} (attempt {attempt + 1}/{max_retries})")
                 response = await client.get(url)
 
                 if response.status_code == 200:
                     return response
                 elif response.status_code == 429:  # Rate limited
                     wait_time = 2 ** attempt
+                    logger.warning(f"Rate limited (429) on {url}, waiting {wait_time}s")
                     await asyncio.sleep(wait_time)
                     continue
                 elif response.status_code == 404:
+                    logger.debug(f"Not found (404): {url}")
                     return None
                 else:
+                    logger.warning(f"HTTP {response.status_code} on {url}")
                     if attempt < max_retries - 1:
                         wait_time = 2 ** attempt
                         await asyncio.sleep(wait_time)
                     continue
 
-            except Exception as e:
+            except httpx.TimeoutException as e:
+                logger.warning(f"Timeout on {url}: {e}")
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     await asyncio.sleep(wait_time)
                 else:
+                    logger.error(f"All retries failed for {url} due to timeout")
+                    return None
+            except httpx.ConnectError as e:
+                logger.error(f"Connection error on {url}: {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"All retries failed for {url} due to connection error")
+                    return None
+            except Exception as e:
+                logger.error(f"Error fetching {url}: {type(e).__name__}: {e}")
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"All retries failed for {url}")
                     return None
 
+        logger.error(f"All retries exhausted for {url}")
         return None
 
     def _calculate_pricing_statistics(self, prices: List[float]) -> Dict[str, Any]:
@@ -128,14 +153,18 @@ class WarframeMarketService:
         Returns:
             List of Prime set items
         """
+        logger = get_logger()
         url = f"{self.v2_url}/items"
+        logger.info(f"Fetching Prime sets list from {url}")
         response = await self._fetch_with_retry(url)
 
         if response is None:
+            logger.error("Failed to fetch items from Warframe Market API - response was None")
             raise Exception("Failed to fetch items from API")
 
         data = response.json()
         items = data.get("data", [])
+        logger.debug(f"API returned {len(items)} total items")
 
         # Filter for items ending with 'prime_set'
         prime_sets = [
@@ -144,8 +173,10 @@ class WarframeMarketService:
         ]
 
         if not prime_sets:
+            logger.error("No Prime sets found in API response")
             raise Exception("No Prime sets found")
 
+        logger.info(f"Found {len(prime_sets)} Prime sets")
         return prime_sets
 
     async def fetch_set_details(self, slug: str) -> Optional[Dict[str, Any]]:

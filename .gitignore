@@ -7,6 +7,10 @@ backend/venv/
 CLAUDE.md
 INITIAL.md
 
+# BMAD framework
+.bmad/
+docs/
+
 # Node.js / Frontend
 node_modules/
 frontend/node_modules/

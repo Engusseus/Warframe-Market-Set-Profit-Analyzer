@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..config import get_settings
 from ..core.cache_manager import CacheManager
+from ..core.logging import get_logger
 from ..core.profit_calculator import calculate_profit_margins_dict
 from ..core.scoring import calculate_profitability_scores_dict, recalculate_scores_with_new_weights
 from ..db.database import AsyncMarketDatabase
@@ -89,102 +90,137 @@ class AnalysisService:
         Returns:
             AnalysisResponse with scored data
         """
+        logger = get_logger()
+        logger.info("=" * 50)
+        logger.info("Starting full analysis")
+        logger.info(f"Parameters: profit_weight={profit_weight}, volume_weight={volume_weight}, force_refresh={force_refresh}")
         self._update_status("running", 0, "Starting analysis...")
 
         try:
             # Step 1: Fetch prime sets list
+            logger.info("Step 1: Fetching Prime sets list from Warframe Market API...")
             self._update_status("running", 5, "Fetching Prime sets list...")
             prime_sets = await self.market_service.fetch_prime_sets()
+            logger.info(f"Found {len(prime_sets)} Prime sets")
 
             # Step 2: Check cache validity
+            logger.info("Step 2: Checking cache validity...")
             cache_valid = not force_refresh and self.cache_manager.is_cache_valid(prime_sets)
+            logger.debug(f"Cache valid: {cache_valid}")
 
             if cache_valid:
+                logger.info("Using cached set details")
                 self._update_status("running", 10, "Using cached data...")
                 detailed_sets = self.cache_manager.get_detailed_sets()
+                logger.info(f"Loaded {len(detailed_sets)} sets from cache")
             else:
                 # Slow path: fetch all set details
+                logger.info("Cache invalid or force refresh - fetching all set details (this may take several minutes)...")
                 self._update_status("running", 10, "Fetching set details (this may take a few minutes)...")
 
                 def detail_progress(current, total, msg):
                     pct = 10 + int((current / total) * 30)
                     self._update_status("running", pct, msg)
+                    if current % 20 == 0 or current == total:
+                        logger.debug(f"Set details progress: {current}/{total}")
 
                 detailed_sets = await self.market_service.fetch_complete_set_data(
                     prime_sets,
                     progress_callback=detail_progress
                 )
+                logger.info(f"Fetched details for {len(detailed_sets)} sets")
 
                 # Update cache
+                logger.debug("Updating cache with new data")
                 self.cache_manager.update_cache(prime_sets, detailed_sets)
 
             if not detailed_sets:
+                logger.error("No detailed sets available")
                 raise Exception("No detailed sets available")
 
             # Step 3: Fetch current pricing data
+            logger.info("Step 3: Fetching set prices...")
             self._update_status("running", 40, "Fetching set prices...")
 
             def set_price_progress(current, total, msg):
                 pct = 40 + int((current / total) * 15)
                 self._update_status("running", pct, msg)
+                if current % 50 == 0 or current == total:
+                    logger.debug(f"Set prices progress: {current}/{total}")
 
             set_prices = await self.market_service.fetch_set_lowest_prices(
                 detailed_sets,
                 progress_callback=set_price_progress
             )
+            logger.info(f"Fetched prices for {len(set_prices)} sets")
 
             # Step 4: Fetch part prices
+            logger.info("Step 4: Fetching part prices...")
             self._update_status("running", 55, "Fetching part prices...")
 
             def part_price_progress(current, total, msg):
                 pct = 55 + int((current / total) * 20)
                 self._update_status("running", pct, msg)
+                if current % 100 == 0 or current == total:
+                    logger.debug(f"Part prices progress: {current}/{total}")
 
             part_prices = await self.market_service.fetch_part_lowest_prices(
                 detailed_sets,
                 progress_callback=part_price_progress
             )
+            logger.info(f"Fetched prices for {len(part_prices)} parts")
 
             # Step 5: Fetch volume data
+            logger.info("Step 5: Fetching volume data...")
             self._update_status("running", 75, "Fetching volume data...")
 
             def volume_progress(current, total, msg):
                 pct = 75 + int((current / total) * 15)
                 self._update_status("running", pct, msg)
+                if current % 50 == 0 or current == total:
+                    logger.debug(f"Volume data progress: {current}/{total}")
 
             volume_data = await self.market_service.fetch_set_volume(
                 detailed_sets,
                 progress_callback=volume_progress
             )
+            logger.info(f"Fetched volume data, total volume: {volume_data.get('total', 0)}")
 
             # Step 6: Calculate profit margins
+            logger.info("Step 6: Calculating profit margins...")
             self._update_status("running", 90, "Calculating profits...")
             profit_data = calculate_profit_margins_dict(
                 set_prices, part_prices, detailed_sets
             )
 
             if not profit_data:
+                logger.error("No profitable sets found after calculation")
                 raise Exception("No profitable sets found")
+            logger.info(f"Calculated profit margins for {len(profit_data)} sets")
 
             # Step 7: Calculate scores
+            logger.info("Step 7: Calculating scores...")
             self._update_status("running", 95, "Calculating scores...")
             scored_data = calculate_profitability_scores_dict(
                 profit_data, volume_data, profit_weight, volume_weight
             )
+            logger.info(f"Calculated scores for {len(scored_data)} sets")
 
             # Store current data for rescoring
             self._current_data = scored_data
             self._current_weights = (profit_weight, volume_weight)
 
             # Step 8: Save to database
+            logger.info("Step 8: Saving to database...")
             run_id = None
             try:
                 db = await self.get_database()
                 run_id = await db.save_market_run(profit_data, set_prices)
                 self.status.run_id = run_id
+                logger.info(f"Saved analysis run to database with ID: {run_id}")
             except Exception as e:
                 # Don't fail analysis if DB save fails
-                pass
+                logger.warning(f"Failed to save to database: {e}")
 
             # Convert to response
             self._update_status("completed", 100, "Analysis complete!")
@@ -192,12 +228,17 @@ class AnalysisService:
             # Convert dict data to ScoredData models
             scored_models = [ScoredData(**item) for item in scored_data]
 
+            profitable_count = len([s for s in scored_models if s.profit_margin > 0])
+            logger.info("=" * 50)
+            logger.info(f"Analysis complete! Total sets: {len(scored_models)}, Profitable: {profitable_count}")
+            logger.info("=" * 50)
+
             return AnalysisResponse(
                 run_id=run_id,
                 timestamp=datetime.now(),
                 sets=scored_models,
                 total_sets=len(scored_models),
-                profitable_sets=len([s for s in scored_models if s.profit_margin > 0]),
+                profitable_sets=profitable_count,
                 weights=WeightsConfig(
                     profit_weight=profit_weight,
                     volume_weight=volume_weight
@@ -206,6 +247,7 @@ class AnalysisService:
             )
 
         except Exception as e:
+            logger.error(f"Analysis failed with error: {e}", exc_info=True)
             self.status.status = "error"
             self.status.error = str(e)
             raise
