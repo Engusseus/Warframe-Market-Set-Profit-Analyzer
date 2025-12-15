@@ -1,8 +1,9 @@
 """Analysis API routes."""
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 
+from ...core.logging import get_logger
 from ...models.schemas import (
     AnalysisConfig,
     AnalysisResponse,
@@ -29,6 +30,7 @@ def get_analysis_service() -> AnalysisService:
 
 @router.get("", response_model=AnalysisResponse)
 async def get_analysis(
+    request: Request,
     force_refresh: bool = Query(False, description="Force fresh data fetch"),
     profit_weight: float = Query(1.0, ge=0.0, le=10.0, description="Profit weight"),
     volume_weight: float = Query(1.2, ge=0.0, le=10.0, description="Volume weight")
@@ -38,6 +40,10 @@ async def get_analysis(
     If no recent analysis exists or force_refresh is True, runs a new analysis.
     Otherwise returns the latest cached analysis.
     """
+    logger = get_logger()
+    logger.info(f"Analysis request received from {request.client.host if request.client else 'unknown'}")
+    logger.info(f"Request params: force_refresh={force_refresh}, profit_weight={profit_weight}, volume_weight={volume_weight}")
+
     service = get_analysis_service()
 
     try:
@@ -47,8 +53,10 @@ async def get_analysis(
             volume_weight=volume_weight,
             force_refresh=force_refresh
         )
+        logger.info(f"Analysis completed successfully, returning {result.total_sets} sets")
         return result
     except Exception as e:
+        logger.error(f"Analysis request failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

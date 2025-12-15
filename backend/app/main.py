@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api.router import api_router
 from .config import get_settings
+from .core.logging import setup_logging, get_logger
 
 
 @asynccontextmanager
@@ -13,10 +14,14 @@ async def lifespan(app: FastAPI):
     """Application lifespan context manager."""
     # Startup
     settings = get_settings()
-    print(f"Starting {settings.app_name} v{settings.app_version}")
+    logger = setup_logging()
+    logger.info(f"Starting {settings.app_name} v{settings.app_version}")
+    logger.info(f"Debug mode: {settings.debug}")
+    logger.info(f"CORS origins: {settings.cors_origins}")
     yield
     # Shutdown
-    print("Shutting down...")
+    logger = get_logger()
+    logger.info("Shutting down...")
 
 
 def create_app() -> FastAPI:
