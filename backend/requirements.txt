@@ -1,0 +1,20 @@
+# Core Framework
+fastapi[standard]>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
+
+# HTTP Client
+httpx>=0.28.0
+
+# Database
+aiosqlite>=0.20.0
+
+# Utilities
+python-dotenv>=1.0.0
+python-multipart>=0.0.15
+
+# Development/Testing
+pytest>=8.0.0
+pytest-asyncio>=0.24.0
+pytest-cov>=5.0.0

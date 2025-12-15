@@ -1,10 +1,18 @@
 # Virtual environment
 venv/
+backend/venv/
 
 # Claude Code configuration
 .claude/
 CLAUDE.md
 INITIAL.md
+
+# Node.js / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.log
+npm-debug.log*
 
 # Python cache files
 __pycache__/
