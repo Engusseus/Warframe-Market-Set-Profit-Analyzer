@@ -1,56 +1,46 @@
 # Warframe Market Set Profit Analyzer
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
 
-A comprehensive tool for analyzing Prime set profitability in Warframe using real-time market data from [Warframe Market](https://warframe.market). Identify the most profitable trading opportunities by comparing complete set prices to individual part costs, with advanced scoring algorithms that factor in both profit margins and trading volume.
+A modern full-stack web application for analyzing Prime set profitability in Warframe using real-time market data from [Warframe Market](https://warframe.market). Features a beautiful dark-themed dashboard with interactive charts, real-time analysis, and historical trend tracking.
 
-## ✨ Features
+## Features
 
-### 📊 **Real-Time Market Analysis**
+### Real-Time Market Analysis
 - **Live Pricing Data**: Fetches current lowest prices for Prime sets and individual parts
 - **48-Hour Volume Analysis**: Trading volume data to identify active vs. stagnant markets
 - **Comprehensive Market Coverage**: Analyzes all available Prime sets automatically
-- **Historical Data Tracking**: SQL database tracks profit and price trends over time
+- **Historical Data Tracking**: SQLite database tracks profit and price trends over time
 
-### 💰 **Advanced Profitability Calculations** 
-- **Profit Margin Analysis**: Set price vs. sum of individual part costs
-- **ROI Calculations**: Return on investment percentages for each set
-- **Quantity-Aware Pricing**: Factors in parts that appear multiple times per set
-- **Detailed Cost Breakdowns**: Part-by-part expense analysis
+### Interactive Dashboard
+- **Beautiful Dark Theme**: Custom color scheme (#080206, #9FBCAD, #7A9DB1, #9681AC)
+- **Profit Charts**: Visual bar charts of top profitable sets
+- **Volume Charts**: Trading activity visualization
+- **Sortable Tables**: Click to sort by score, profit, volume, or ROI
+- **Expandable Rows**: Detailed part breakdown for each set
 
-### ⚖️ **Intelligent Scoring System**
+### Advanced Scoring System
 - **Weighted Scoring Algorithm**: Combines profit and volume with customizable weights
-- **Data Normalization**: Fair comparison across different price and volume scales
-- **Interactive Configuration**: User-defined weights (default: Profit=1.0×, Volume=1.2×)
-- **Top 10 Rankings**: Quickly identify the most profitable opportunities
+- **Real-Time Rescoring**: Apply new weights without re-fetching data
+- **Preset Strategies**: Balanced, Profit Focus, Volume Focus
+- **Interactive Sliders**: Easy weight adjustment
 
-### 🗄️ **Data Persistence & Export**
-- **SQLite Database**: Transaction-safe storage of all analysis runs
-- **JSON Export**: Export historical data in LLM-friendly format for analysis
-- **Trend Analysis**: Track profit margins and prices over time
-- **Data Integrity**: Only complete runs saved - no partial/corrupted data
+### Full REST API
+- **FastAPI Backend**: Modern async Python API
+- **OpenAPI Documentation**: Auto-generated at `/docs`
+- **Background Tasks**: Long-running analysis runs asynchronously
 
-### 🚀 **Performance & Reliability**
-- **Smart Caching System**: SHA-256 hash-based cache invalidation reduces API calls by 95%+
-- **Rate Limiting**: Respects API limits with automatic throttling (3 requests/second)
-- **Retry Logic**: Exponential backoff for network reliability
-- **Graceful Error Handling**: Continues operation even with partial data failures
-- **Thread-Safe Operations**: Safe concurrent database access
-
-### 🛠️ **Zero-Configuration Setup**
-- **Automatic Environment Management**: Creates and manages Python virtual environment
-- **Dependency Auto-Installation**: Installs required packages automatically
-- **Cross-Platform Support**: Works on Windows, macOS, and Linux
-- **Single Command Execution**: Just run `python main.py`
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
-- Python 3.7 or higher
-- Internet connection for API access
+- Python 3.12+
+- Node.js 22+
+- npm or yarn
 
-### Installation & Usage
+### Development Setup
 
 1. **Clone the repository**
    ```bash
@@ -58,179 +48,155 @@ A comprehensive tool for analyzing Prime set profitability in Warframe using rea
    cd Warframe-Market-Set-Profit-Analyzer
    ```
 
-2. **Run the analyzer**
+2. **Start the Backend**
    ```bash
-   python main.py
+   cd backend
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   pip install -r requirements.txt
+   uvicorn app.main:app --reload
    ```
+   Backend runs at http://localhost:8000
 
-The application will show you a menu:
-```
-1. Start Market Analysis  - Run analysis and save results to database
-2. Export Database to JSON - Export historical data for trend analysis  
-3. Exit Application
-```
+3. **Start the Frontend**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   Frontend runs at http://localhost:5173
 
-The application will automatically:
-- Create a virtual environment if needed
-- Install dependencies (`requests==2.31.0`, `rich`)
-- Fetch and analyze all Prime set data
-- Save results to SQLite database (`cache/market_runs.sqlite`)
-- Display comprehensive profitability analysis
+### Docker Deployment
 
-### First Run vs. Subsequent Runs
-
-**First Run** (~2-5 minutes):
-- Fetches complete Prime set data from Warframe Market API
-- Builds comprehensive cache with part quantities and relationships
-- Performs full market analysis
-- Creates SQLite database and saves results
-
-**Subsequent Runs** (~30-60 seconds):
-- Uses cached set data (only refetches if data has changed)
-- Fetches only real-time pricing and volume data
-- Saves new analysis to database for trend tracking
-- Provides same comprehensive analysis with much faster execution
-
-### Data Export & Analysis
-Use the **Export Database to JSON** option to:
-- Export all historical market runs to `cache/market_data_export.json`
-- Analyze profit and price trends over time
-- Perform advanced analysis with external tools (Excel, Python, etc.)
-- Share data in a structured, LLM-friendly format
-
-## 📋 Sample Output
-
-```
-PROFITABILITY ANALYSIS
-============================================================
-
-TOP 10 MOST PROFITABLE PRIME SETS
-====================================================================================================
-Rank Set Name                          Profit   Volume   Score    ROI%     Details
-----------------------------------------------------------------------------------------------------
-1    Ash Prime Set                      +156     2,340    2.85     +47.3%   View below
-2    Banshee Prime Set                  +89      1,890    2.41     +31.2%   View below
-3    Ember Prime Set                    +234     1,200    2.38     +78.9%   View below
-
-DETAILED BREAKDOWN (TOP 5)
-====================================================================================================
-
-1. Ash Prime Set
-------------------------------------------------------------
-Set Price: 350 platinum
-Part Cost: 194 platinum  
-Profit Margin: +156 platinum (+47.3% ROI)
-Trading Volume: 2,340 units (48h)
-Total Score: 2.85 (Profit: 1.42, Volume: 1.43)
-
-Part Breakdown:
-  • Ash Prime Blueprint: 45 × 1 = 45 plat
-  • Ash Prime Chassis: 78 × 1 = 78 plat
-  • Ash Prime Neuroptics: 71 × 1 = 71 plat
+```bash
+docker-compose up -d
 ```
 
-## 🎛️ Configuration Options
+This starts:
+- Backend API at http://localhost:8000
+- Frontend at http://localhost:80
 
-### Weight Customization
-When running the analyzer, you'll be prompted to configure scoring weights:
-
-```
-SCORING WEIGHT CONFIGURATION
-============================================================
-Configure how much weight to give each factor in the final score:
-• Profit Weight: How much to emphasize profit margins
-• Volume Weight: How much to emphasize trading volume
-
-Weight Selection:
-1. Use default weights (Profit=1.0, Volume=1.2)
-2. Custom weights
-
-Enter choice (1-2): 
-```
-
-**Recommended Weight Strategies:**
-- **Conservative Trading** (High Volume Focus): Profit=0.8, Volume=1.5
-- **High Risk/Reward** (High Profit Focus): Profit=1.5, Volume=0.8  
-- **Balanced Approach** (Default): Profit=1.0, Volume=1.2
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 Warframe-Market-Set-Profit-Analyzer/
-├── main.py              # Main application with CLI and analysis logic
-├── database.py          # SQLite database module (transaction-safe)
-├── requirements.txt     # Python dependencies (requests==2.31.0, rich)
-├── cache/              # Data storage directory
-│   ├── .gitkeep        # Preserves directory structure
-│   ├── prime_sets_cache.json     # API response cache (auto-generated)
-│   ├── market_runs.sqlite        # SQLite database (auto-generated)
-│   └── market_data_export.json   # JSON export file (user-generated)
-├── venv/               # Auto-generated virtual environment
-├── LICENSE             # MIT License
-├── README.md           # This file
-└── CONTRIBUTING.md     # Contribution guidelines with database examples
+├── backend/
+│   ├── app/
+│   │   ├── api/routes/        # FastAPI endpoints
+│   │   │   ├── analysis.py    # /api/analysis
+│   │   │   ├── history.py     # /api/history
+│   │   │   ├── sets.py        # /api/sets
+│   │   │   ├── stats.py       # /api/stats
+│   │   │   └── export.py      # /api/export
+│   │   ├── core/              # Business logic
+│   │   │   ├── rate_limiter.py
+│   │   │   ├── profit_calculator.py
+│   │   │   ├── scoring.py
+│   │   │   └── normalization.py
+│   │   ├── services/          # API clients
+│   │   │   ├── warframe_market.py
+│   │   │   └── analysis_service.py
+│   │   ├── models/schemas.py  # Pydantic models
+│   │   ├── db/database.py     # Async SQLite
+│   │   ├── config.py          # Settings
+│   │   └── main.py            # FastAPI app
+│   ├── requirements.txt
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── api/               # API client & types
+│   │   ├── components/        # React components
+│   │   │   ├── layout/
+│   │   │   ├── analysis/
+│   │   │   ├── charts/
+│   │   │   └── common/
+│   │   ├── pages/             # Page components
+│   │   ├── store/             # Zustand state
+│   │   └── App.tsx
+│   ├── package.json
+│   └── Dockerfile
+├── cache/                     # Data persistence
+├── docker-compose.yml
+└── .env.example
 ```
 
-### Database Schema
-The SQLite database (`cache/market_runs.sqlite`) stores:
-- **market_runs**: Metadata for each analysis run (timestamp, date)
-- **set_profits**: Profit margins and lowest prices for each Prime set
-- **Indexes**: Optimized for fast queries on timestamps and set names
+## API Endpoints
 
-**Note**: Database files are git-ignored to keep personal analysis data private.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/analysis` | Run or get latest analysis |
+| POST | `/api/analysis` | Trigger background analysis |
+| GET | `/api/analysis/status` | Get analysis progress |
+| POST | `/api/analysis/rescore` | Rescore with new weights |
+| GET | `/api/history` | List historical runs |
+| GET | `/api/history/{run_id}` | Get run details |
+| GET | `/api/sets` | List all sets |
+| GET | `/api/sets/{slug}` | Get set details |
+| GET | `/api/stats` | Database statistics |
+| GET | `/api/export` | Export all data |
 
-## 🔧 Technical Details
+## Configuration
 
-### API Endpoints Used
-- **Prime Sets**: `https://api.warframe.market/v2/items`
-- **Set Details**: `https://api.warframe.market/v2/item/{slug}`
-- **Pricing Data**: `https://api.warframe.market/v2/orders/item/{slug}/top`
-- **Volume Data**: `https://api.warframe.market/v1/items/{slug}/statistics`
+### Environment Variables
 
-### Caching Strategy
-The application uses SHA-256 hash-based cache invalidation:
-- Calculates hash of Prime sets array from API
-- Only refetches detailed data when upstream changes detected
-- Dramatically improves performance on subsequent runs
-- Cache files are automatically managed and git-ignored
+Create a `.env` file in the backend directory:
 
-### Rate Limiting
-- Respects Warframe Market API limits with 3 requests per second
-- Automatic waiting with user feedback during rate limiting
-- Exponential backoff retry logic for failed requests
+```env
+DEBUG=false
+DATABASE_PATH=cache/market_runs.sqlite
+RATE_LIMIT_REQUESTS=3
+RATE_LIMIT_WINDOW=1.0
+DEFAULT_PROFIT_WEIGHT=1.0
+DEFAULT_VOLUME_WEIGHT=1.2
+CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+```
 
-## 🤝 Contributing
+### Scoring Weights
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+| Strategy | Profit Weight | Volume Weight | Use Case |
+|----------|---------------|---------------|----------|
+| Balanced | 1.0 | 1.2 | Default, good for most users |
+| Profit Focus | 1.5 | 0.8 | Maximize profit margins |
+| Volume Focus | 0.8 | 1.5 | Prioritize liquid markets |
 
-Key areas for contribution:
-- **Database Extensions**: Advanced analytics, custom export formats
-- **New Analysis Features**: Additional metrics, scoring algorithms
-- **Performance Optimizations**: Async processing, improved caching
-- **UI Improvements**: Better console output, progress indicators
-- **API Enhancements**: Additional endpoints, data sources
-- **Testing**: Unit tests, integration tests, error case coverage
+## Tech Stack
 
-## 📜 License
+### Backend
+- **FastAPI** - Modern async Python framework
+- **Pydantic** - Data validation
+- **httpx** - Async HTTP client
+- **aiosqlite** - Async SQLite
+- **uvicorn** - ASGI server
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### Frontend
+- **React 19** - UI framework
+- **TypeScript** - Type safety
+- **Vite** - Build tool
+- **Tailwind CSS** - Styling
+- **Zustand** - State management
+- **TanStack Query** - Data fetching
+- **Recharts** - Charts
+- **React Router** - Routing
 
-## ⚠️ Disclaimer
+## Contributing
 
-This tool is for educational and informational purposes. Trading decisions should always consider multiple factors including market volatility, personal risk tolerance, and current game meta. The authors are not responsible for any trading losses.
+We welcome contributions! Key areas:
+- Additional analysis metrics
+- More chart types
+- Performance optimizations
+- Test coverage
+- Documentation
 
-## 🙏 Acknowledgments
+## License
 
-- [Warframe Market](https://warframe.market) for providing the excellent API
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
+
+- [Warframe Market](https://warframe.market) for the excellent API
 - [Digital Extremes](https://www.digitalextremes.com/) for creating Warframe
-- The Warframe trading community for market data and feedback
-
-## 📞 Support
-
-- **Issues**: Please use [GitHub Issues](https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/issues)
-- **Feature Requests**: Submit via GitHub Issues with the `enhancement` label
-- **Questions**: Check existing issues or create a new `question` labeled issue
+- The Warframe trading community
 
 ---
 
-**Happy Trading, Tenno!** 🎮
+**Happy Trading, Tenno!**
