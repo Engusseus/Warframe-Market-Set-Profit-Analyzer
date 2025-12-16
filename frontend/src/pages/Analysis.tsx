@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, RefreshCw, Filter } from 'lucide-react';
-import { runAnalysis, rescoreAnalysis } from '../api/analysis';
+import { runAnalysis, rescoreAnalysis, getAnalysisStatus } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
 import { Layout } from '../components/layout/Layout';
 import { Card } from '../components/common/Card';
@@ -22,10 +22,62 @@ export function Analysis() {
   } = useAnalysisStore();
 
   const [showFilters, setShowFilters] = useState(true);
+  const [progress, setProgress] = useState<number>(0);
+  const [statusMessage, setStatusMessage] = useState<string>('Starting analysis...');
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPollingRef = useRef(false);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+      }
+    };
+  }, []);
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+    isPollingRef.current = false;
+  }, []);
+
+  const pollStatus = useCallback(async () => {
+    if (!isPollingRef.current) return;
+
+    try {
+      const status = await getAnalysisStatus();
+      setProgress(status.progress ?? 0);
+      setStatusMessage(status.message ?? 'Processing...');
+
+      if (status.status === 'completed' || status.status === 'error' || status.status === 'idle') {
+        stopPolling();
+      }
+    } catch (err) {
+      // Continue polling even if status check fails
+      console.error('Status poll failed:', err);
+    }
+  }, [stopPolling]);
+
+  const startPolling = useCallback(() => {
+    if (isPollingRef.current) return;
+
+    isPollingRef.current = true;
+    setProgress(0);
+    setStatusMessage('Starting analysis...');
+
+    // Poll immediately, then every 500ms
+    pollStatus();
+    pollingRef.current = setInterval(pollStatus, 500);
+  }, [pollStatus]);
 
   const handleRunAnalysis = async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
+    startPolling();
+
     try {
       const result = await runAnalysis(
         weights.profit_weight,
@@ -33,9 +85,12 @@ export function Analysis() {
         forceRefresh
       );
       setAnalysis(result);
+      setProgress(100);
+      setStatusMessage('Analysis complete!');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed');
     } finally {
+      stopPolling();
       setLoading(false);
     }
   };
@@ -108,9 +163,11 @@ export function Analysis() {
           </Card>
         )}
 
-        {/* Loading State */}
+        {/* Loading State with Progress */}
         {isLoading && (
-          <Loading message="Running analysis... This may take a minute." />
+          <Card className="border-mint/30">
+            <Loading message={statusMessage} progress={progress} />
+          </Card>
         )}
 
         {/* Main Content */}
