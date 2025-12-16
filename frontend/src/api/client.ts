@@ -16,7 +16,6 @@ export const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 300000, // 5 minutes for long-running analysis (matches nginx proxy_read_timeout)
 });
 
 // Request interceptor for debugging
