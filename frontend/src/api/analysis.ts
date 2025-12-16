@@ -53,6 +53,11 @@ export async function getRunDetail(runId: number): Promise<RunDetail> {
   return response.data;
 }
 
+export async function getHistoricalAnalysis(runId: number): Promise<AnalysisResponse> {
+  const response = await apiClient.get<AnalysisResponse>(`/history/${runId}/analysis`);
+  return response.data;
+}
+
 export async function getSetDetail(slug: string): Promise<SetDetail> {
   const response = await apiClient.get<SetDetail>(`/sets/${slug}`);
   return response.data;

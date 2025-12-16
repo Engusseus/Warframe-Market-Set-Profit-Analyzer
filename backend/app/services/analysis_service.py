@@ -252,6 +252,15 @@ class AnalysisService:
                 run_id = await db.save_market_run(profit_data, set_prices)
                 self.status.run_id = run_id
                 logger.info(f"Saved analysis run to database with ID: {run_id}")
+
+                # Save full scored data for historical restoration
+                await db.save_full_analysis(
+                    run_id,
+                    scored_data,
+                    profit_weight,
+                    volume_weight
+                )
+                logger.info(f"Saved full analysis data for run {run_id}")
             except Exception as e:
                 # Don't fail analysis if DB save fails
                 logger.warning(f"Failed to save to database: {e}")

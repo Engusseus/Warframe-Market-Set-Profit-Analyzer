@@ -1,15 +1,13 @@
 import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, Database, Clock, TrendingUp, Play, Loader2 } from 'lucide-react';
+import { BarChart3, Database, Clock, TrendingUp, Play, Loader2, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { runAnalysis, getStats } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
 import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
 import { Layout } from '../components/layout/Layout';
 import { StatCard, Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
-import { ProfitTable } from '../components/analysis/ProfitTable';
-import { ProfitChart, VolumeChart } from '../components/charts/ProfitChart';
-import { WeightConfig } from '../components/analysis/WeightConfig';
 
 export function Dashboard() {
   const {
@@ -25,7 +23,6 @@ export function Dashboard() {
     setProgress,
   } = useAnalysisStore();
 
-  const [showCharts, setShowCharts] = useState(true);
   const [testMode, setTestMode] = useState(false);
 
   // Track "waiting for SSE connection" state
@@ -91,20 +88,6 @@ export function Dashboard() {
     setLoading(true);
     setProgress(0, 'Connecting...');
     setIsInitiating(true);
-  };
-
-  const handleApplyWeights = async (profitWeight: number, volumeWeight: number) => {
-    if (!currentAnalysis) {
-      setLoading(true);
-      try {
-        const result = await runAnalysis(profitWeight, volumeWeight, false);
-        setAnalysis(result);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Analysis failed');
-      } finally {
-        setLoading(false);
-      }
-    }
   };
 
   return (
@@ -222,69 +205,23 @@ export function Dashboard() {
           />
         </div>
 
-        {/* Main Content */}
+        {/* Analysis Ready - Direct to Analysis Tab */}
         {currentAnalysis && !isLoading && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-            {/* Sidebar - Weight Config */}
-            <div className="lg:col-span-1">
-              <WeightConfig
-                profitWeight={weights.profit_weight}
-                volumeWeight={weights.volume_weight}
-                onApply={handleApplyWeights}
-                loading={isLoading}
-              />
-
-              {/* Toggle Charts */}
-              <Card className="mt-4">
-                <label className="flex items-center justify-between cursor-pointer">
-                  <span className="text-gray-300">Show Charts</span>
-                  <input
-                    type="checkbox"
-                    checked={showCharts}
-                    onChange={(e) => setShowCharts(e.target.checked)}
-                    className="w-4 h-4 accent-mint"
-                  />
-                </label>
-              </Card>
-
-              {/* Quick Stats */}
-              <Card className="mt-4 space-y-3">
-                <h4 className="text-sm font-medium text-gray-400 uppercase">Analysis Info</h4>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Run ID</span>
-                    <span className="text-mint">{currentAnalysis.run_id || '-'}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Cached</span>
-                    <span className={currentAnalysis.cached ? 'text-wf-blue' : 'text-mint'}>
-                      {currentAnalysis.cached ? 'Yes' : 'Fresh'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">Timestamp</span>
-                    <span className="text-gray-300">
-                      {new Date(currentAnalysis.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                </div>
-              </Card>
+          <Card className="border-mint/20 bg-gradient-to-r from-dark-card to-dark-bg">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-200">Analysis Ready</h3>
+                <p className="text-sm text-gray-400 mt-1">
+                  {currentAnalysis.total_sets} sets analyzed • {currentAnalysis.profitable_sets} profitable
+                </p>
+              </div>
+              <Link to="/analysis">
+                <Button icon={<ArrowRight className="w-4 h-4" />}>
+                  View Results
+                </Button>
+              </Link>
             </div>
-
-            {/* Main Area */}
-            <div className="lg:col-span-3 space-y-6">
-              {/* Charts */}
-              {showCharts && (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  <ProfitChart sets={currentAnalysis.sets} limit={10} />
-                  <VolumeChart sets={currentAnalysis.sets} limit={10} />
-                </div>
-              )}
-
-              {/* Table */}
-              <ProfitTable sets={currentAnalysis.sets} />
-            </div>
-          </div>
+          </Card>
         )}
 
         {/* Empty State */}
