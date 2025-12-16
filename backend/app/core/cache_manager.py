@@ -5,8 +5,9 @@ Extracted from main.py lines 431-444 and 1153-1165.
 import hashlib
 import json
 import os
+import random
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def calculate_hash(data: Any) -> str:
@@ -116,3 +117,80 @@ class CacheManager:
         if last_updated:
             return time.time() - last_updated
         return None
+
+    def get_random_set_for_canary(self) -> Optional[str]:
+        """Get a random set slug from cache for canary validation.
+
+        Returns:
+            Random set slug or None if cache is empty
+        """
+        detailed_sets = self.get_detailed_sets()
+        if not detailed_sets:
+            return None
+        random_set = random.choice(detailed_sets)
+        return random_set.get('slug')
+
+    def get_cached_set_by_slug(self, slug: str) -> Optional[Dict[str, Any]]:
+        """Get a specific set from cache by slug.
+
+        Args:
+            slug: Set slug to find
+
+        Returns:
+            Cached set data or None if not found
+        """
+        detailed_sets = self.get_detailed_sets()
+        if not detailed_sets:
+            return None
+        for set_data in detailed_sets:
+            if set_data.get('slug') == slug:
+                return set_data
+        return None
+
+    def compare_set_data(
+        self,
+        cached_set: Dict[str, Any],
+        fresh_set: Dict[str, Any]
+    ) -> Tuple[bool, str]:
+        """Compare cached set data against fresh API data.
+
+        Checks that parts and quantities match.
+
+        Args:
+            cached_set: Set data from cache
+            fresh_set: Set data from fresh API call
+
+        Returns:
+            Tuple of (is_valid, reason)
+        """
+        cached_parts = cached_set.get('setParts', [])
+        fresh_parts = fresh_set.get('setParts', [])
+
+        # Check part count
+        if len(cached_parts) != len(fresh_parts):
+            return (
+                False,
+                f"Part count mismatch: cached={len(cached_parts)}, fresh={len(fresh_parts)}"
+            )
+
+        # Build lookup for fresh parts by code
+        fresh_parts_lookup = {p.get('code'): p for p in fresh_parts}
+
+        # Compare each cached part against fresh data
+        for cached_part in cached_parts:
+            part_code = cached_part.get('code')
+            fresh_part = fresh_parts_lookup.get(part_code)
+
+            if fresh_part is None:
+                return (False, f"Part {part_code} not found in fresh data")
+
+            cached_qty = cached_part.get('quantityInSet', 1)
+            fresh_qty = fresh_part.get('quantityInSet', 1)
+
+            if cached_qty != fresh_qty:
+                return (
+                    False,
+                    f"Quantity mismatch for {part_code}: cached={cached_qty}, fresh={fresh_qty}"
+                )
+
+        return (True, "Canary check passed")

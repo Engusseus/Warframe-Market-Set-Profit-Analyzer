@@ -260,6 +260,39 @@ class WarframeMarketService:
                 "quantityInSet": 1
             }
 
+    async def fetch_single_set_for_canary(self, slug: str) -> Optional[Dict[str, Any]]:
+        """Fetch a single set's details for canary validation.
+
+        This is a lightweight fetch used to validate cache integrity.
+        Fetches set details and part quantities for comparison against cache.
+
+        Args:
+            slug: Set slug identifier
+
+        Returns:
+            Set data in same format as cached data, or None if fetch failed
+        """
+        logger = get_logger()
+        logger.debug(f"Canary check: fetching details for {slug}")
+
+        set_details = await self.fetch_set_details(slug)
+        if set_details is None:
+            logger.warning(f"Canary check: failed to fetch set details for {slug}")
+            return None
+
+        # Fetch part quantities (same as in fetch_complete_set_data)
+        parts_with_quantities = []
+        for part_code in set_details['setParts']:
+            part_info = await self.fetch_part_quantity(part_code)
+            parts_with_quantities.append(part_info)
+
+        return {
+            'id': set_details['id'],
+            'name': set_details['name'],
+            'slug': slug,
+            'setParts': parts_with_quantities
+        }
+
     async def fetch_item_prices(self, item_identifier: str) -> List[float]:
         """Fetch top sell orders for a specific item.
 
