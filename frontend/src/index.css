@@ -39,6 +39,16 @@
   100% { transform: translateY(0); opacity: 1; }
 }
 
+@keyframes progress-stripes {
+  0% { background-position: 0 0; }
+  100% { background-position: 40px 0; }
+}
+
+@keyframes progress-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(159, 188, 173, 0.3); }
+  50% { box-shadow: 0 0 15px rgba(159, 188, 173, 0.6); }
+}
+
 /* Base styles */
 :root {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
