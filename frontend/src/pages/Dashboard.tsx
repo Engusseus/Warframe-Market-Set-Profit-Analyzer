@@ -24,7 +24,9 @@ export function Dashboard() {
     progressMessage,
     setProgress,
   } = useAnalysisStore();
+
   const [showCharts, setShowCharts] = useState(true);
+  const [testMode, setTestMode] = useState(false);
 
   // Track "waiting for SSE connection" state
   const [isInitiating, setIsInitiating] = useState(false);
@@ -42,6 +44,7 @@ export function Dashboard() {
 
   // Execute the actual analysis API call (called after SSE connects)
   const executeAnalysis = useCallback(async () => {
+    console.log('[Dashboard] Starting analysis execution...');
     setIsInitiating(false);
     setProgress(0, 'Starting analysis...');
 
@@ -49,31 +52,43 @@ export function Dashboard() {
       const result = await runAnalysis(
         weights.profit_weight,
         weights.volume_weight,
-        false
+        false,
+        testMode
       );
       setAnalysis(result);
     } catch (err) {
+      console.error('[Dashboard] Analysis failed', err);
       setError(err instanceof Error ? err.message : 'Analysis failed');
     } finally {
       setLoading(false);
     }
-  }, [weights, setAnalysis, setError, setLoading, setProgress]);
+  }, [weights, setAnalysis, setError, setLoading, setProgress, testMode]);
+
+  const handleConnected = useCallback(() => {
+    console.log('[Dashboard] SSE Connected. isInitiating:', isInitiating);
+    // Only trigger API once connected AND we are in the initiating phase
+    if (isInitiating) {
+      executeAnalysis();
+    }
+  }, [isInitiating, executeAnalysis]);
+
+  const handleError = useCallback((err: string) => {
+    console.error('[Dashboard] SSE Error:', err);
+    // If we get an SSE error during initiation, we should probably stop or show error
+    // But for now just log it.
+  }, []);
 
   // Subscribe to progress updates when analysis is running or initiating
   useAnalysisProgress(isLoading || isInitiating, {
     onProgress: handleProgress,
-    onConnected: () => {
-      // Only trigger API once connected AND we are in the initiating phase
-      if (isInitiating) {
-        executeAnalysis();
-      }
-    },
+    onConnected: handleConnected,
+    onError: handleError
   });
 
   // Button handler - starts the connection process, API call triggered by onConnected
   const handleRunAnalysis = () => {
-    setLoading(true);
     setError(null);
+    setLoading(true);
     setProgress(0, 'Connecting...');
     setIsInitiating(true);
   };
@@ -112,6 +127,15 @@ export function Dashboard() {
                 <p className="text-sm text-gray-500">
                   Fetch latest market data and calculate profitability
                 </p>
+                <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={testMode}
+                    onChange={(e) => setTestMode(e.target.checked)}
+                    className="w-4 h-4 accent-mint rounded bg-dark-bg border-dark-border"
+                  />
+                  <span className="text-sm text-gray-400">Test Mode (Limit 10 sets)</span>
+                </label>
               </div>
               <Button
                 onClick={handleRunAnalysis}
