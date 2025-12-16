@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, Database, Clock, TrendingUp, Play, RefreshCw, Loader2 } from 'lucide-react';
+import { BarChart3, Database, Clock, TrendingUp, Play, Loader2 } from 'lucide-react';
 import { runAnalysis, getStats } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
 import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
@@ -42,7 +42,7 @@ export function Dashboard() {
     onProgress: handleProgress,
   });
 
-  const handleRunAnalysis = async (forceRefresh = false) => {
+  const handleRunAnalysis = async () => {
     setLoading(true);
     setError(null);
     setProgress(0, 'Starting analysis...');
@@ -50,7 +50,7 @@ export function Dashboard() {
       const result = await runAnalysis(
         weights.profit_weight,
         weights.volume_weight,
-        forceRefresh
+        false
       );
       setAnalysis(result);
     } catch (err) {
@@ -95,23 +95,13 @@ export function Dashboard() {
                   Fetch latest market data and calculate profitability
                 </p>
               </div>
-              <div className="flex space-x-3">
-                <Button
-                  onClick={() => handleRunAnalysis(false)}
-                  disabled={isLoading}
-                  icon={isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                >
-                  {isLoading ? 'Running...' : 'Run Analysis'}
-                </Button>
-                <Button
-                  onClick={() => handleRunAnalysis(true)}
-                  variant="secondary"
-                  disabled={isLoading}
-                  icon={<RefreshCw className="w-4 h-4" />}
-                >
-                  Force Refresh
-                </Button>
-              </div>
+              <Button
+                onClick={handleRunAnalysis}
+                disabled={isLoading}
+                icon={isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+              >
+                {isLoading ? 'Running...' : 'Run Analysis'}
+              </Button>
             </div>
 
             {/* Progress Section */}
@@ -125,10 +115,28 @@ export function Dashboard() {
                     {progress ?? 0}%
                   </span>
                 </div>
-                <div className="w-full h-3 bg-dark-border rounded-full overflow-hidden">
+                <div
+                  className="w-full h-4 bg-dark-border rounded-full overflow-hidden"
+                  style={{ animation: 'progress-glow 2s ease-in-out infinite' }}
+                >
                   <div
-                    className="h-full bg-gradient-to-r from-mint to-wf-blue transition-all duration-300 ease-out"
-                    style={{ width: `${progress ?? 0}%` }}
+                    className="h-full transition-all duration-300 ease-out"
+                    style={{
+                      width: `${progress ?? 0}%`,
+                      background: 'linear-gradient(90deg, #9FBCAD, #7A9DB1)',
+                      backgroundImage: `
+                        linear-gradient(90deg, #9FBCAD, #7A9DB1),
+                        repeating-linear-gradient(
+                          45deg,
+                          transparent,
+                          transparent 10px,
+                          rgba(255,255,255,0.15) 10px,
+                          rgba(255,255,255,0.15) 20px
+                        )
+                      `,
+                      backgroundSize: '100% 100%, 40px 40px',
+                      animation: 'progress-stripes 1s linear infinite',
+                    }}
                   />
                 </div>
               </div>
