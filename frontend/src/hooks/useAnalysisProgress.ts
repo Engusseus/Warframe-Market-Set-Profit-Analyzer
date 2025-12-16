@@ -62,10 +62,10 @@ export function useAnalysisProgress(
         // Check for completion or error
         if (data.status === 'completed') {
           onComplete?.(data);
-          cleanup();
+          // Don't cleanup on completion, let parent control lifecycle
         } else if (data.status === 'error') {
           onError?.(data.error || 'Analysis failed');
-          cleanup();
+          // Don't cleanup on error either, let parent retry if needed
         }
       } catch (e) {
         console.error('[SSE] Failed to parse progress update:', e);

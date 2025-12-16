@@ -147,8 +147,11 @@ class WarframeMarketService:
 
         return stats
 
-    async def fetch_prime_sets(self) -> List[Dict[str, Any]]:
+    async def fetch_prime_sets(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
         """Fetch list of all Prime sets from API.
+
+        Args:
+            limit: Optional limit on number of sets to return (for testing)
 
         Returns:
             List of Prime set items
@@ -175,6 +178,10 @@ class WarframeMarketService:
         if not prime_sets:
             logger.error("No Prime sets found in API response")
             raise Exception("No Prime sets found")
+
+        if limit:
+            logger.info(f"Limiting to first {limit} Prime sets for testing")
+            prime_sets = prime_sets[:limit]
 
         logger.info(f"Found {len(prime_sets)} Prime sets")
         return prime_sets
