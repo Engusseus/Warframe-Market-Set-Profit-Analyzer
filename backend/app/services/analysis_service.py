@@ -107,10 +107,40 @@ class AnalysisService:
             prime_sets = await self.market_service.fetch_prime_sets(limit=limit)
             logger.info(f"Found {len(prime_sets)} Prime sets")
 
-            # Step 2: Check cache validity
-            logger.info("Step 2: Checking cache validity...")
+            # Step 2: Check cache validity (SHA-256 hash check)
+            logger.info("Step 2: Checking cache validity (SHA-256 hash)...")
             cache_valid = not force_refresh and self.cache_manager.is_cache_valid(prime_sets)
-            logger.debug(f"Cache valid: {cache_valid}")
+            logger.debug(f"SHA-256 cache valid: {cache_valid}")
+
+            # Step 2b: Canary check - validate random set against API
+            if cache_valid:
+                logger.info("Step 2b: Performing canary validation...")
+                self._update_status("running", 7, "Validating cache integrity...")
+
+                canary_slug = self.cache_manager.get_random_set_for_canary()
+                if canary_slug:
+                    logger.info(f"Canary check: validating {canary_slug}")
+                    cached_set = self.cache_manager.get_cached_set_by_slug(canary_slug)
+                    fresh_set = await self.market_service.fetch_single_set_for_canary(canary_slug)
+
+                    if cached_set and fresh_set:
+                        is_valid, reason = self.cache_manager.compare_set_data(cached_set, fresh_set)
+                        if is_valid:
+                            logger.info(f"Canary check passed for {canary_slug}")
+                        else:
+                            logger.warning(f"Canary check FAILED for {canary_slug}: {reason}")
+                            logger.warning("Cache appears stale - forcing full refresh")
+                            cache_valid = False
+                    elif fresh_set is None:
+                        # API fetch failed - trust the cache rather than failing
+                        logger.warning(f"Canary check: could not fetch {canary_slug} from API, trusting cache")
+                    else:
+                        # Cached set not found - something wrong with cache
+                        logger.warning(f"Canary check: {canary_slug} not found in cache, forcing refresh")
+                        cache_valid = False
+                else:
+                    logger.warning("Canary check: no sets in cache to validate")
+                    cache_valid = False
 
             if cache_valid:
                 logger.info("Using cached set details")
