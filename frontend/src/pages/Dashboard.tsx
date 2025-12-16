@@ -143,10 +143,12 @@ export function Dashboard() {
 
         {/* Loading State */}
         {isLoading && (
-          <Loading
-            message={progressMessage || 'Running analysis...'}
-            progress={progress ?? undefined}
-          />
+          <Card className="border-mint/30">
+            <Loading
+              message={progressMessage || 'Running analysis...'}
+              progress={progress ?? undefined}
+            />
+          </Card>
         )}
 
         {/* Main Content */}
