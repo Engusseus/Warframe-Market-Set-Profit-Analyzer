@@ -77,6 +77,7 @@ class AnalysisService:
         profit_weight: float = 1.0,
         volume_weight: float = 1.2,
         force_refresh: bool = False,
+        test_mode: bool = False,
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> AnalysisResponse:
         """Run complete market analysis.
@@ -85,6 +86,7 @@ class AnalysisService:
             profit_weight: Weight for profit scoring
             volume_weight: Weight for volume scoring
             force_refresh: Force fresh data fetch even if cache is valid
+            test_mode: If True, only fetch a small subset of data for testing
             progress_callback: Optional callback for progress updates
 
         Returns:
@@ -93,14 +95,16 @@ class AnalysisService:
         logger = get_logger()
         logger.info("=" * 50)
         logger.info("Starting full analysis")
-        logger.info(f"Parameters: profit_weight={profit_weight}, volume_weight={volume_weight}, force_refresh={force_refresh}")
+        logger.info(f"Parameters: profit_weight={profit_weight}, volume_weight={volume_weight}, force_refresh={force_refresh}, test_mode={test_mode}")
         self._update_status("running", 0, "Starting analysis...")
 
         try:
             # Step 1: Fetch prime sets list
             logger.info("Step 1: Fetching Prime sets list from Warframe Market API...")
             self._update_status("running", 5, "Fetching Prime sets list...")
-            prime_sets = await self.market_service.fetch_prime_sets()
+
+            limit = 10 if test_mode else None
+            prime_sets = await self.market_service.fetch_prime_sets(limit=limit)
             logger.info(f"Found {len(prime_sets)} Prime sets")
 
             # Step 2: Check cache validity

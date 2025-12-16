@@ -4,13 +4,15 @@ import type { AnalysisResponse, AnalysisStatus, StatsResponse, HistoryResponse, 
 export async function runAnalysis(
   profitWeight: number = 1.0,
   volumeWeight: number = 1.2,
-  forceRefresh: boolean = false
+  forceRefresh: boolean = false,
+  testMode: boolean = false
 ): Promise<AnalysisResponse> {
   const response = await apiClient.get<AnalysisResponse>('/analysis', {
     params: {
       profit_weight: profitWeight,
       volume_weight: volumeWeight,
       force_refresh: forceRefresh,
+      test_mode: testMode,
     },
   });
   return response.data;

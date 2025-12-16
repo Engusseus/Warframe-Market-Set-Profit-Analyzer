@@ -53,11 +53,12 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
     progressMessage: null,
   }),
 
-  setLoading: (loading) => set({
-    isLoading: loading,
-    // Reset progress when not loading
-    ...(loading ? {} : { progress: null, progressMessage: null }),
-  }),
+  setLoading: (loading) => {
+    set({
+      isLoading: loading,
+      // Do NOT reset progress here, let it persist or be reset explicitly
+    });
+  },
 
   setError: (error) => set({ error, isLoading: false, progress: null, progressMessage: null }),
 
