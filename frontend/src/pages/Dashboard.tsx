@@ -26,6 +26,9 @@ export function Dashboard() {
   } = useAnalysisStore();
   const [showCharts, setShowCharts] = useState(true);
 
+  // Track "waiting for SSE connection" state
+  const [isInitiating, setIsInitiating] = useState(false);
+
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
@@ -37,15 +40,11 @@ export function Dashboard() {
     setProgress(update.progress, update.message);
   }, [setProgress]);
 
-  // Subscribe to progress updates when analysis is running
-  useAnalysisProgress(isLoading, {
-    onProgress: handleProgress,
-  });
-
-  const handleRunAnalysis = async () => {
-    setLoading(true);
-    setError(null);
+  // Execute the actual analysis API call (called after SSE connects)
+  const executeAnalysis = useCallback(async () => {
+    setIsInitiating(false);
     setProgress(0, 'Starting analysis...');
+
     try {
       const result = await runAnalysis(
         weights.profit_weight,
@@ -58,6 +57,25 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
+  }, [weights, setAnalysis, setError, setLoading, setProgress]);
+
+  // Subscribe to progress updates when analysis is running or initiating
+  useAnalysisProgress(isLoading || isInitiating, {
+    onProgress: handleProgress,
+    onConnected: () => {
+      // Only trigger API once connected AND we are in the initiating phase
+      if (isInitiating) {
+        executeAnalysis();
+      }
+    },
+  });
+
+  // Button handler - starts the connection process, API call triggered by onConnected
+  const handleRunAnalysis = () => {
+    setLoading(true);
+    setError(null);
+    setProgress(0, 'Connecting...');
+    setIsInitiating(true);
   };
 
   const handleApplyWeights = async (profitWeight: number, volumeWeight: number) => {
