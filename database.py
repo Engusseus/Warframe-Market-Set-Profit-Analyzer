@@ -4,8 +4,53 @@ import sqlite3
 import json
 import time
 import threading
+import queue
+import contextlib
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+
+
+class SQLiteConnectionPool:
+    """Simple connection pool for SQLite connections."""
+
+    def __init__(self, db_path: str, max_connections: int = 5):
+        self.db_path = db_path
+        self.max_connections = max_connections
+        self._pool = queue.Queue(maxsize=max_connections)
+
+    def get(self) -> sqlite3.Connection:
+        """Get a connection from the pool or create a new one."""
+        try:
+            return self._pool.get_nowait()
+        except queue.Empty:
+            # Create a new connection if pool is empty
+            conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._configure_connection(conn)
+            return conn
+
+    def put(self, conn: sqlite3.Connection):
+        """Return a connection to the pool."""
+        try:
+            self._pool.put_nowait(conn)
+        except queue.Full:
+            # If pool is full, close the connection
+            conn.close()
+
+    def close_all(self):
+        """Close all connections in the pool."""
+        while True:
+            try:
+                conn = self._pool.get_nowait()
+                conn.close()
+            except queue.Empty:
+                break
+
+    def _configure_connection(self, conn: sqlite3.Connection):
+        """Configure a new connection with necessary PRAGMAs."""
+        # Enable foreign key constraints
+        conn.execute('PRAGMA foreign_keys = ON')
+        # Set synchronous mode for better performance while maintaining safety
+        conn.execute('PRAGMA synchronous = NORMAL')
 
 
 class MarketDatabase:
@@ -30,14 +75,27 @@ class MarketDatabase:
         db_dir = os.path.dirname(self.db_path)
         os.makedirs(db_dir, exist_ok=True)
         
+        # Initialize connection pool
+        self.pool = SQLiteConnectionPool(self.db_path)
+
         # Initialize database with proper settings
         self._create_tables()
         self._configure_database()
     
+    @contextlib.contextmanager
+    def managed_connection(self):
+        """Context manager for obtaining a pooled connection with transaction support."""
+        conn = self.pool.get()
+        try:
+            with conn:
+                yield conn
+        finally:
+            self.pool.put(conn)
+
     def _create_tables(self):
         """Create database tables if they don't exist."""
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.managed_connection() as conn:
                 cursor = conn.cursor()
                 
                 # Create market_runs table
@@ -80,19 +138,15 @@ class MarketDatabase:
                 cursor.execute('INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)',
                              ('schema_version', str(self.SCHEMA_VERSION)))
                 
-                conn.commit()
+                # managed_connection handles commit automatically via 'with conn:'
     
     def _configure_database(self):
         """Configure database settings for optimal performance and safety."""
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
-                # Enable foreign key constraints
-                conn.execute('PRAGMA foreign_keys = ON')
-                # Set WAL mode for better concurrency
+            with self.managed_connection() as conn:
+                # Set WAL mode for better concurrency (persistent setting)
                 conn.execute('PRAGMA journal_mode = WAL')
-                # Set synchronous mode for better performance while maintaining safety
-                conn.execute('PRAGMA synchronous = NORMAL')
-                conn.commit()
+                # Other per-connection settings are handled by the pool
     
     def _validate_market_run_data(self, profit_data: List[Dict[str, Any]], set_prices: List[Dict[str, Any]]) -> None:
         """Validate input data for market run."""
@@ -143,8 +197,10 @@ class MarketDatabase:
         price_lookup = {item['slug']: item['lowest_price'] for item in set_prices}
         
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
-                try:
+            # Use pooled connection
+            # managed_connection handles transaction start and commit/rollback
+            try:
+                with self.managed_connection() as conn:
                     cursor = conn.cursor()
                     
                     # Insert market run record
@@ -174,19 +230,16 @@ class MarketDatabase:
                         VALUES (?, ?, ?, ?, ?)
                     ''', profit_records)
                     
-                    # Commit the transaction
-                    conn.commit()
                     return run_id
-                    
-                except Exception as e:
-                    # Transaction will be rolled back automatically
-                    conn.rollback()
-                    raise Exception(f"Failed to save market run: {e}")
+            except Exception as e:
+                # The managed_connection context manager handles rollback
+                # We re-raise to notify caller
+                raise Exception(f"Failed to save market run: {e}")
     
     def get_run_count(self) -> int:
         """Get total number of market runs in database."""
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.managed_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('SELECT COUNT(*) FROM market_runs')
                 return cursor.fetchone()[0]
@@ -194,7 +247,7 @@ class MarketDatabase:
     def get_latest_run_id(self) -> Optional[int]:
         """Get the ID of the most recent market run."""
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.managed_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('SELECT run_id FROM market_runs ORDER BY timestamp DESC LIMIT 1')
                 result = cursor.fetchone()
@@ -206,7 +259,7 @@ class MarketDatabase:
             raise ValueError("limit must be positive")
             
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.managed_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                 SELECT 
@@ -233,7 +286,7 @@ class MarketDatabase:
             raise ValueError("limit must be positive")
             
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.managed_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                 SELECT 
@@ -258,60 +311,60 @@ class MarketDatabase:
             Dict containing all market run data in a structured format
         """
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.managed_connection() as conn:
                 cursor = conn.cursor()
             
-            # Get all market runs
-            cursor.execute('SELECT run_id, timestamp, date_string FROM market_runs ORDER BY timestamp')
-            runs = [dict(zip(['run_id', 'timestamp', 'date_string'], row)) for row in cursor.fetchall()]
-            
-            # Get all set profit data grouped by run
-            export_data = {
-                'metadata': {
-                    'export_timestamp': int(time.time()),
-                    'export_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'total_runs': len(runs),
-                    'database_path': self.db_path
-                },
-                'market_runs': []
-            }
-            
-            for run in runs:
-                run_id = run['run_id']
+                # Get all market runs
+                cursor.execute('SELECT run_id, timestamp, date_string FROM market_runs ORDER BY timestamp')
+                runs = [dict(zip(['run_id', 'timestamp', 'date_string'], row)) for row in cursor.fetchall()]
                 
-                # Get all set profits for this run
-                cursor.execute('''
-                    SELECT set_slug, set_name, profit_margin, lowest_price
-                    FROM set_profits
-                    WHERE run_id = ?
-                    ORDER BY set_name
-                ''', (run_id,))
-                
-                set_profits = [
-                    {
-                        'set_slug': row[0],
-                        'set_name': row[1],
-                        'profit_margin': row[2],
-                        'lowest_price': row[3]
-                    }
-                    for row in cursor.fetchall()
-                ]
-                
-                run_data = {
-                    'run_info': run,
-                    'set_profits': set_profits,
-                    'summary': {
-                        'total_sets': len(set_profits),
-                        'average_profit': sum(s['profit_margin'] for s in set_profits) / len(set_profits) if set_profits else 0,
-                        'max_profit': max((s['profit_margin'] for s in set_profits), default=0),
-                        'min_profit': min((s['profit_margin'] for s in set_profits), default=0),
-                        'profitable_sets': len([s for s in set_profits if s['profit_margin'] > 0])
-                    }
+                # Get all set profit data grouped by run
+                export_data = {
+                    'metadata': {
+                        'export_timestamp': int(time.time()),
+                        'export_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        'total_runs': len(runs),
+                        'database_path': self.db_path
+                    },
+                    'market_runs': []
                 }
                 
-                export_data['market_runs'].append(run_data)
-            
-            return export_data
+                for run in runs:
+                    run_id = run['run_id']
+
+                    # Get all set profits for this run
+                    cursor.execute('''
+                        SELECT set_slug, set_name, profit_margin, lowest_price
+                        FROM set_profits
+                        WHERE run_id = ?
+                        ORDER BY set_name
+                    ''', (run_id,))
+
+                    set_profits = [
+                        {
+                            'set_slug': row[0],
+                            'set_name': row[1],
+                            'profit_margin': row[2],
+                            'lowest_price': row[3]
+                        }
+                        for row in cursor.fetchall()
+                    ]
+
+                    run_data = {
+                        'run_info': run,
+                        'set_profits': set_profits,
+                        'summary': {
+                            'total_sets': len(set_profits),
+                            'average_profit': sum(s['profit_margin'] for s in set_profits) / len(set_profits) if set_profits else 0,
+                            'max_profit': max((s['profit_margin'] for s in set_profits), default=0),
+                            'min_profit': min((s['profit_margin'] for s in set_profits), default=0),
+                            'profitable_sets': len([s for s in set_profits if s['profit_margin'] > 0])
+                        }
+                    }
+
+                    export_data['market_runs'].append(run_data)
+                
+                return export_data
     
     def save_json_export(self, output_path: str = "cache/market_data_export.json") -> str:
         """Save JSON export to file.
@@ -335,44 +388,37 @@ class MarketDatabase:
     def get_database_stats(self) -> Dict[str, Any]:
         """Get database statistics."""
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.managed_connection() as conn:
                 cursor = conn.cursor()
             
-            # Get run count
-            cursor.execute('SELECT COUNT(*) FROM market_runs')
-            run_count = cursor.fetchone()[0]
-            
-            # Get total set profits recorded
-            cursor.execute('SELECT COUNT(*) FROM set_profits')
-            profit_count = cursor.fetchone()[0]
-            
-            # Get date range
-            cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM market_runs')
-            time_range = cursor.fetchone()
-            
-            stats = {
-                'total_runs': run_count,
-                'total_profit_records': profit_count,
-                'database_size_bytes': os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
-            }
-            
-            if time_range[0] and time_range[1]:
-                stats['first_run'] = datetime.fromtimestamp(time_range[0]).strftime('%Y-%m-%d %H:%M:%S')
-                stats['last_run'] = datetime.fromtimestamp(time_range[1]).strftime('%Y-%m-%d %H:%M:%S')
-                stats['time_span_days'] = (time_range[1] - time_range[0]) / (24 * 3600)
-            
-            return stats
+                # Get run count
+                cursor.execute('SELECT COUNT(*) FROM market_runs')
+                run_count = cursor.fetchone()[0]
+
+                # Get total set profits recorded
+                cursor.execute('SELECT COUNT(*) FROM set_profits')
+                profit_count = cursor.fetchone()[0]
+
+                # Get date range
+                cursor.execute('SELECT MIN(timestamp), MAX(timestamp) FROM market_runs')
+                time_range = cursor.fetchone()
+
+                stats = {
+                    'total_runs': run_count,
+                    'total_profit_records': profit_count,
+                    'database_size_bytes': os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+                }
+
+                if time_range[0] and time_range[1]:
+                    stats['first_run'] = datetime.fromtimestamp(time_range[0]).strftime('%Y-%m-%d %H:%M:%S')
+                    stats['last_run'] = datetime.fromtimestamp(time_range[1]).strftime('%Y-%m-%d %H:%M:%S')
+                    stats['time_span_days'] = (time_range[1] - time_range[0]) / (24 * 3600)
+
+                return stats
     
     def close(self) -> None:
-        """Close database connection and cleanup resources.
-        
-        Note: This implementation uses context managers so no persistent
-        connections need to be closed, but this method is provided for
-        API completeness and future connection pooling implementations.
-        """
-        # Currently no persistent connections to close
-        # This method is reserved for future connection pooling
-        pass
+        """Close database connection and cleanup resources."""
+        self.pool.close_all()
     
     def vacuum_database(self) -> None:
         """Optimize database by running VACUUM operation.
@@ -381,11 +427,19 @@ class MarketDatabase:
         Should be run periodically on databases with many deletions.
         """
         with self._lock:
-            with sqlite3.connect(self.db_path) as conn:
-                # Vacuum cannot be run inside a transaction
+            # VACUUM cannot run inside a transaction
+            # managed_connection uses 'with conn' which starts a transaction
+            # So we need to get a connection manually and handle it
+            conn = self.pool.get()
+            try:
+                old_isolation = conn.isolation_level
                 conn.isolation_level = None  # Enable autocommit mode
-                conn.execute('VACUUM')
-                conn.isolation_level = ''  # Restore transaction mode
+                try:
+                    conn.execute('VACUUM')
+                finally:
+                    conn.isolation_level = old_isolation
+            finally:
+                self.pool.put(conn)
 
 
 def get_database_instance() -> MarketDatabase:
