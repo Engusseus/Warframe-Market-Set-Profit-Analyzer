@@ -7,6 +7,10 @@ interface AnalysisState {
   isLoading: boolean;
   error: string | null;
 
+  // Progress tracking
+  progress: number | null;
+  progressMessage: string | null;
+
   // Weights
   weights: WeightsConfig;
 
@@ -19,6 +23,7 @@ interface AnalysisState {
   setAnalysis: (analysis: AnalysisResponse) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  setProgress: (progress: number | null, message?: string | null) => void;
   setWeights: (profit: number, volume: number) => void;
   setSelectedSet: (set: ScoredSet | null) => void;
   setSorting: (sortBy: 'score' | 'profit' | 'volume' | 'roi', sortOrder: 'asc' | 'desc') => void;
@@ -29,6 +34,8 @@ const initialState = {
   currentAnalysis: null,
   isLoading: false,
   error: null,
+  progress: null,
+  progressMessage: null,
   weights: { profit_weight: 1.0, volume_weight: 1.2 },
   selectedSet: null,
   sortBy: 'score' as const,
@@ -42,11 +49,19 @@ export const useAnalysisStore = create<AnalysisState>((set) => ({
     currentAnalysis: analysis,
     weights: analysis.weights,
     error: null,
+    progress: null,
+    progressMessage: null,
   }),
 
-  setLoading: (loading) => set({ isLoading: loading }),
+  setLoading: (loading) => set({
+    isLoading: loading,
+    // Reset progress when not loading
+    ...(loading ? {} : { progress: null, progressMessage: null }),
+  }),
 
-  setError: (error) => set({ error, isLoading: false }),
+  setError: (error) => set({ error, isLoading: false, progress: null, progressMessage: null }),
+
+  setProgress: (progress, message = null) => set({ progress, progressMessage: message }),
 
   setWeights: (profit, volume) => set({
     weights: { profit_weight: profit, volume_weight: volume },

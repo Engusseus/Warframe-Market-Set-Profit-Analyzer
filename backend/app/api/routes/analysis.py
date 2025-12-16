@@ -1,7 +1,10 @@
 """Analysis API routes."""
+import asyncio
+import json
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 from ...core.logging import get_logger
 from ...models.schemas import (
@@ -113,6 +116,72 @@ async def get_analysis_status() -> AnalysisStatusResponse:
         progress=status["progress"],
         message=status["message"],
         run_id=status["run_id"]
+    )
+
+
+@router.get("/progress")
+async def stream_analysis_progress(request: Request):
+    """Stream analysis progress via Server-Sent Events (SSE).
+
+    Returns real-time progress updates as the analysis runs.
+    Connection stays open until analysis completes or client disconnects.
+    """
+    service = get_analysis_service()
+
+    async def event_generator():
+        """Generate SSE events for analysis progress."""
+        last_progress = -1
+        last_message = ""
+
+        while True:
+            # Check if client disconnected
+            if await request.is_disconnected():
+                break
+
+            status = service.get_status()
+            current_progress = status["progress"]
+            current_message = status["message"]
+            current_status = status["status"]
+
+            # Only send updates when there's a change
+            if current_progress != last_progress or current_message != last_message:
+                data = json.dumps({
+                    "status": current_status,
+                    "progress": current_progress,
+                    "message": current_message,
+                    "run_id": status["run_id"],
+                    "error": status.get("error")
+                })
+                yield f"data: {data}\n\n"
+
+                last_progress = current_progress
+                last_message = current_message
+
+            # Stop streaming when analysis is complete or errored
+            if current_status in ("completed", "error", "idle"):
+                # Send final status
+                if current_status != "idle":
+                    data = json.dumps({
+                        "status": current_status,
+                        "progress": current_progress,
+                        "message": current_message,
+                        "run_id": status["run_id"],
+                        "error": status.get("error")
+                    })
+                    yield f"data: {data}\n\n"
+                break
+
+            # Poll interval - check status every 100ms
+            await asyncio.sleep(0.1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
     )
 
 

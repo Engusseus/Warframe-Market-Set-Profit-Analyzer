@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, Database, Clock, TrendingUp, Play, RefreshCw } from 'lucide-react';
 import { runAnalysis, getStats } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
+import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
 import { Layout } from '../components/layout/Layout';
 import { StatCard, Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
@@ -12,7 +13,18 @@ import { ProfitChart, VolumeChart } from '../components/charts/ProfitChart';
 import { WeightConfig } from '../components/analysis/WeightConfig';
 
 export function Dashboard() {
-  const { currentAnalysis, setAnalysis, isLoading, setLoading, error, setError, weights } = useAnalysisStore();
+  const {
+    currentAnalysis,
+    setAnalysis,
+    isLoading,
+    setLoading,
+    error,
+    setError,
+    weights,
+    progress,
+    progressMessage,
+    setProgress,
+  } = useAnalysisStore();
   const [showCharts, setShowCharts] = useState(true);
 
   const { data: stats } = useQuery({
@@ -21,9 +33,20 @@ export function Dashboard() {
     staleTime: 60000,
   });
 
+  // Handle progress updates from SSE
+  const handleProgress = useCallback((update: { progress: number | null; message: string | null }) => {
+    setProgress(update.progress, update.message);
+  }, [setProgress]);
+
+  // Subscribe to progress updates when analysis is running
+  useAnalysisProgress(isLoading, {
+    onProgress: handleProgress,
+  });
+
   const handleRunAnalysis = async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
+    setProgress(0, 'Starting analysis...');
     try {
       const result = await runAnalysis(
         weights.profit_weight,
@@ -120,7 +143,10 @@ export function Dashboard() {
 
         {/* Loading State */}
         {isLoading && (
-          <Loading message="Running analysis... This may take a minute." />
+          <Loading
+            message={progressMessage || 'Running analysis...'}
+            progress={progress ?? undefined}
+          />
         )}
 
         {/* Main Content */}

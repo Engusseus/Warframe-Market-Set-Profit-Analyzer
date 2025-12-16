@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Play, RefreshCw, Filter } from 'lucide-react';
-import { runAnalysis, rescoreAnalysis, getAnalysisStatus } from '../api/analysis';
+import { runAnalysis, rescoreAnalysis } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
+import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
 import { Layout } from '../components/layout/Layout';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
@@ -19,65 +20,27 @@ export function Analysis() {
     setError,
     weights,
     setWeights,
+    progress,
+    progressMessage,
+    setProgress,
   } = useAnalysisStore();
 
   const [showFilters, setShowFilters] = useState(true);
-  const [progress, setProgress] = useState<number>(0);
-  const [statusMessage, setStatusMessage] = useState<string>('Starting analysis...');
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isPollingRef = useRef(false);
 
-  // Cleanup polling on unmount
-  useEffect(() => {
-    return () => {
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-      }
-    };
-  }, []);
+  // Handle progress updates from SSE
+  const handleProgress = useCallback((update: { progress: number | null; message: string | null }) => {
+    setProgress(update.progress, update.message);
+  }, [setProgress]);
 
-  const stopPolling = useCallback(() => {
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-    isPollingRef.current = false;
-  }, []);
-
-  const pollStatus = useCallback(async () => {
-    if (!isPollingRef.current) return;
-
-    try {
-      const status = await getAnalysisStatus();
-      setProgress(status.progress ?? 0);
-      setStatusMessage(status.message ?? 'Processing...');
-
-      if (status.status === 'completed' || status.status === 'error' || status.status === 'idle') {
-        stopPolling();
-      }
-    } catch (err) {
-      // Continue polling even if status check fails
-      console.error('Status poll failed:', err);
-    }
-  }, [stopPolling]);
-
-  const startPolling = useCallback(() => {
-    if (isPollingRef.current) return;
-
-    isPollingRef.current = true;
-    setProgress(0);
-    setStatusMessage('Starting analysis...');
-
-    // Poll immediately, then every 500ms
-    pollStatus();
-    pollingRef.current = setInterval(pollStatus, 500);
-  }, [pollStatus]);
+  // Subscribe to progress updates when analysis is running
+  useAnalysisProgress(isLoading, {
+    onProgress: handleProgress,
+  });
 
   const handleRunAnalysis = async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
-    startPolling();
-
+    setProgress(0, 'Starting analysis...');
     try {
       const result = await runAnalysis(
         weights.profit_weight,
@@ -85,12 +48,9 @@ export function Analysis() {
         forceRefresh
       );
       setAnalysis(result);
-      setProgress(100);
-      setStatusMessage('Analysis complete!');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed');
     } finally {
-      stopPolling();
       setLoading(false);
     }
   };
@@ -166,7 +126,10 @@ export function Analysis() {
         {/* Loading State with Progress */}
         {isLoading && (
           <Card className="border-mint/30">
-            <Loading message={statusMessage} progress={progress} />
+            <Loading
+              message={progressMessage || 'Running analysis...'}
+              progress={progress ?? undefined}
+            />
           </Card>
         )}
 
