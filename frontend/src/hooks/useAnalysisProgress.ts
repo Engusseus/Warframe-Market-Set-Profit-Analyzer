@@ -12,6 +12,7 @@ interface UseAnalysisProgressOptions {
   onProgress?: (update: ProgressUpdate) => void;
   onComplete?: (update: ProgressUpdate) => void;
   onError?: (error: string) => void;
+  onConnected?: () => void;
 }
 
 /**
@@ -26,7 +27,7 @@ export function useAnalysisProgress(
   options: UseAnalysisProgressOptions = {}
 ) {
   const eventSourceRef = useRef<EventSource | null>(null);
-  const { onProgress, onComplete, onError } = options;
+  const { onProgress, onComplete, onError, onConnected } = options;
 
   const cleanup = useCallback(() => {
     if (eventSourceRef.current) {
@@ -46,6 +47,10 @@ export function useAnalysisProgress(
     const url = `${API_BASE_URL}/analysis/progress`;
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
+
+    eventSource.onopen = () => {
+      onConnected?.();
+    };
 
     eventSource.onmessage = (event) => {
       try {
@@ -78,7 +83,7 @@ export function useAnalysisProgress(
 
     // Cleanup on unmount or when isActive changes
     return cleanup;
-  }, [isActive, onProgress, onComplete, onError, cleanup]);
+  }, [isActive, onProgress, onComplete, onError, onConnected, cleanup]);
 
   return {
     isConnected: eventSourceRef.current?.readyState === EventSource.OPEN,
