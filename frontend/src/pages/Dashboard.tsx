@@ -1,13 +1,12 @@
 import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, Database, Clock, TrendingUp, Play, RefreshCw } from 'lucide-react';
+import { BarChart3, Database, Clock, TrendingUp, Play, RefreshCw, Loader2 } from 'lucide-react';
 import { runAnalysis, getStats } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
 import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
 import { Layout } from '../components/layout/Layout';
 import { StatCard, Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
-import { Loading } from '../components/common/Loading';
 import { ProfitTable } from '../components/analysis/ProfitTable';
 import { ProfitChart, VolumeChart } from '../components/charts/ProfitChart';
 import { WeightConfig } from '../components/analysis/WeightConfig';
@@ -79,31 +78,70 @@ export function Dashboard() {
     <Layout>
       <div className="space-y-8">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold gradient-text">Dashboard</h1>
-            <p className="text-gray-400 mt-1">
-              Analyze Warframe Market Prime set profitability
-            </p>
-          </div>
-          <div className="flex space-x-3">
-            <Button
-              onClick={() => handleRunAnalysis(false)}
-              loading={isLoading}
-              icon={<Play className="w-4 h-4" />}
-            >
-              Run Analysis
-            </Button>
-            <Button
-              onClick={() => handleRunAnalysis(true)}
-              variant="secondary"
-              loading={isLoading}
-              icon={<RefreshCw className="w-4 h-4" />}
-            >
-              Force Refresh
-            </Button>
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold gradient-text">Dashboard</h1>
+          <p className="text-gray-400 mt-1">
+            Analyze Warframe Market Prime set profitability
+          </p>
         </div>
+
+        {/* Analysis Control Section */}
+        <Card className="border-mint/20 bg-gradient-to-r from-dark-card to-dark-bg">
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-200">Run Analysis</h2>
+                <p className="text-sm text-gray-500">
+                  Fetch latest market data and calculate profitability
+                </p>
+              </div>
+              <div className="flex space-x-3">
+                <Button
+                  onClick={() => handleRunAnalysis(false)}
+                  disabled={isLoading}
+                  icon={isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                >
+                  {isLoading ? 'Running...' : 'Run Analysis'}
+                </Button>
+                <Button
+                  onClick={() => handleRunAnalysis(true)}
+                  variant="secondary"
+                  disabled={isLoading}
+                  icon={<RefreshCw className="w-4 h-4" />}
+                >
+                  Force Refresh
+                </Button>
+              </div>
+            </div>
+
+            {/* Progress Section */}
+            {isLoading && (
+              <div className="pt-4 border-t border-dark-border">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-gray-400">
+                    {progressMessage || 'Initializing...'}
+                  </span>
+                  <span className="text-sm font-medium text-mint">
+                    {progress ?? 0}%
+                  </span>
+                </div>
+                <div className="w-full h-3 bg-dark-border rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-mint to-wf-blue transition-all duration-300 ease-out"
+                    style={{ width: `${progress ?? 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Error Display */}
+            {error && (
+              <div className="pt-4 border-t border-dark-border">
+                <p className="text-profit-negative text-sm">{error}</p>
+              </div>
+            )}
+          </div>
+        </Card>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -133,23 +171,6 @@ export function Dashboard() {
             color="purple"
           />
         </div>
-
-        {/* Error Display */}
-        {error && (
-          <Card className="border-profit-negative/50 bg-profit-negative/10">
-            <p className="text-profit-negative">{error}</p>
-          </Card>
-        )}
-
-        {/* Loading State */}
-        {isLoading && (
-          <Card className="border-mint/30">
-            <Loading
-              message={progressMessage || 'Running analysis...'}
-              progress={progress ?? undefined}
-            />
-          </Card>
-        )}
 
         {/* Main Content */}
         {currentAnalysis && !isLoading && (
@@ -221,12 +242,9 @@ export function Dashboard() {
           <Card className="text-center py-12">
             <BarChart3 className="w-16 h-16 text-mint mx-auto mb-4 opacity-50" />
             <h3 className="text-xl font-semibold text-gray-200 mb-2">No Analysis Data</h3>
-            <p className="text-gray-400 mb-6">
-              Run an analysis to see profitable Prime sets
+            <p className="text-gray-400">
+              Click "Run Analysis" above to fetch market data and calculate profitability
             </p>
-            <Button onClick={() => handleRunAnalysis(false)} icon={<Play className="w-4 h-4" />}>
-              Run Your First Analysis
-            </Button>
           </Card>
         )}
       </div>
