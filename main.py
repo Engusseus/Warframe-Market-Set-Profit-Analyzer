@@ -1586,7 +1586,14 @@ def recalculate_scores_with_new_weights(scored_data, new_weights, old_weights):
         normalized_volume = normalized_volumes[i] if normalized_volumes else 0
         
         # Calculate new weighted score
-        total_score = (normalized_profit * new_profit_weight) + (normalized_volume * new_volume_weight)
+        profit_score = normalized_profit * new_profit_weight
+        volume_score = normalized_volume * new_volume_weight
+        total_score = profit_score + volume_score
+
+        item['normalized_profit'] = normalized_profit
+        item['normalized_volume'] = normalized_volume
+        item['profit_score'] = profit_score
+        item['volume_score'] = volume_score
         item['total_score'] = total_score
     
     # Re-sort by new scores
