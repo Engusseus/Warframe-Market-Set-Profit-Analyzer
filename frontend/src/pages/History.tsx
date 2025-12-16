@@ -1,16 +1,24 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { History as HistoryIcon, ChevronRight, Calendar, BarChart3 } from 'lucide-react';
-import { getHistory, getRunDetail } from '../api/analysis';
+import { useNavigate } from 'react-router-dom';
+import { History as HistoryIcon, ChevronRight, Calendar, BarChart3, ExternalLink } from 'lucide-react';
+import { getHistory, getRunDetail, getHistoricalAnalysis } from '../api/analysis';
+import { useAnalysisStore } from '../store/analysisStore';
 import { Layout } from '../components/layout/Layout';
 import { Card } from '../components/common/Card';
+import { Button } from '../components/common/Button';
 import { Loading } from '../components/common/Loading';
 import type { RunDetail } from '../api/types';
 
 export function History() {
+  const navigate = useNavigate();
+  const { setAnalysis } = useAnalysisStore();
+
   const [page, setPage] = useState(1);
   const [selectedRun, setSelectedRun] = useState<RunDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const { data: history, isLoading } = useQuery({
     queryKey: ['history', page],
@@ -19,6 +27,7 @@ export function History() {
 
   const handleSelectRun = async (runId: number) => {
     setLoadingDetail(true);
+    setLoadError(null);
     try {
       const detail = await getRunDetail(runId);
       setSelectedRun(detail);
@@ -26,6 +35,25 @@ export function History() {
       console.error('Failed to load run detail:', err);
     } finally {
       setLoadingDetail(false);
+    }
+  };
+
+  const handleLoadToAnalysis = async (runId: number) => {
+    setLoadingAnalysis(true);
+    setLoadError(null);
+    try {
+      const analysis = await getHistoricalAnalysis(runId);
+      setAnalysis(analysis);
+      navigate('/analysis');
+    } catch (err) {
+      console.error('Failed to load historical analysis:', err);
+      setLoadError(
+        err instanceof Error && err.message.includes('404')
+          ? 'Full analysis data not available for this run. Only newer runs have complete data stored.'
+          : 'Failed to load analysis data'
+      );
+    } finally {
+      setLoadingAnalysis(false);
     }
   };
 
@@ -117,18 +145,35 @@ export function History() {
                 <Loading message="Loading run details..." />
               ) : selectedRun ? (
                 <Card className="space-y-6">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h3 className="text-xl font-semibold text-gray-100">
                         Run #{selectedRun.run_id}
                       </h3>
                       <p className="text-gray-400 text-sm">{selectedRun.date_string}</p>
                     </div>
-                    <div className="flex items-center space-x-2 text-mint">
-                      <BarChart3 className="w-5 h-5" />
-                      <span className="font-medium">{selectedRun.summary.total_sets} sets</span>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center space-x-2 text-mint">
+                        <BarChart3 className="w-5 h-5" />
+                        <span className="font-medium">{selectedRun.summary.total_sets} sets</span>
+                      </div>
+                      <Button
+                        onClick={() => handleLoadToAnalysis(selectedRun.run_id)}
+                        disabled={loadingAnalysis}
+                        variant="secondary"
+                        icon={<ExternalLink className="w-4 h-4" />}
+                      >
+                        {loadingAnalysis ? 'Loading...' : 'Load in Analysis'}
+                      </Button>
                     </div>
                   </div>
+
+                  {/* Error Display */}
+                  {loadError && (
+                    <div className="p-3 rounded-lg bg-profit-negative/10 border border-profit-negative/30">
+                      <p className="text-sm text-profit-negative">{loadError}</p>
+                    </div>
+                  )}
 
                   {/* Summary Stats */}
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

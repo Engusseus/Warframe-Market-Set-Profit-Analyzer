@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { ScoredSet, AnalysisResponse, WeightsConfig } from '../api/types';
 
 interface AnalysisState {
@@ -42,38 +43,51 @@ const initialState = {
   sortOrder: 'desc' as const,
 };
 
-export const useAnalysisStore = create<AnalysisState>((set) => ({
-  ...initialState,
+export const useAnalysisStore = create<AnalysisState>()(
+  persist(
+    (set) => ({
+      ...initialState,
 
-  setAnalysis: (analysis) => set({
-    currentAnalysis: analysis,
-    weights: analysis.weights,
-    error: null,
-    progress: null,
-    progressMessage: null,
-  }),
+      setAnalysis: (analysis) => set({
+        currentAnalysis: analysis,
+        weights: analysis.weights,
+        error: null,
+        progress: null,
+        progressMessage: null,
+      }),
 
-  setLoading: (loading) => {
-    set({
-      isLoading: loading,
-      // Do NOT reset progress here, let it persist or be reset explicitly
-    });
-  },
+      setLoading: (loading) => {
+        set({
+          isLoading: loading,
+          // Do NOT reset progress here, let it persist or be reset explicitly
+        });
+      },
 
-  setError: (error) => set({ error, isLoading: false, progress: null, progressMessage: null }),
+      setError: (error) => set({ error, isLoading: false, progress: null, progressMessage: null }),
 
-  setProgress: (progress, message = null) => set({ progress, progressMessage: message }),
+      setProgress: (progress, message = null) => set({ progress, progressMessage: message }),
 
-  setWeights: (profit, volume) => set({
-    weights: { profit_weight: profit, volume_weight: volume },
-  }),
+      setWeights: (profit, volume) => set({
+        weights: { profit_weight: profit, volume_weight: volume },
+      }),
 
-  setSelectedSet: (selectedSet) => set({ selectedSet }),
+      setSelectedSet: (selectedSet) => set({ selectedSet }),
 
-  setSorting: (sortBy, sortOrder) => set({ sortBy, sortOrder }),
+      setSorting: (sortBy, sortOrder) => set({ sortBy, sortOrder }),
 
-  reset: () => set(initialState),
-}));
+      reset: () => set(initialState),
+    }),
+    {
+      name: 'wf-analysis-storage',
+      partialize: (state) => ({
+        currentAnalysis: state.currentAnalysis,
+        weights: state.weights,
+        sortBy: state.sortBy,
+        sortOrder: state.sortOrder,
+      }),
+    }
+  )
+);
 
 // Selector for sorted sets
 export function getSortedSets(state: AnalysisState): ScoredSet[] {

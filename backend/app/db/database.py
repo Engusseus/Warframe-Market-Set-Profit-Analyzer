@@ -22,7 +22,7 @@ class AsyncMarketDatabase:
     """
 
     # Database schema version for future migrations
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(self, db_path: Optional[str] = None):
         """Initialize database connection and ensure table exists."""
@@ -96,6 +96,46 @@ class AsyncMarketDatabase:
                         value TEXT NOT NULL
                     )
                 ''')
+
+                # Create scored_set_data table for full analysis storage
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS scored_set_data (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        run_id INTEGER NOT NULL,
+                        set_slug TEXT NOT NULL,
+                        set_name TEXT NOT NULL,
+                        set_price REAL NOT NULL,
+                        part_cost REAL NOT NULL,
+                        profit_margin REAL NOT NULL,
+                        profit_percentage REAL NOT NULL,
+                        volume INTEGER NOT NULL,
+                        normalized_profit REAL NOT NULL,
+                        normalized_volume REAL NOT NULL,
+                        profit_score REAL NOT NULL,
+                        volume_score REAL NOT NULL,
+                        total_score REAL NOT NULL,
+                        part_details TEXT NOT NULL,
+                        FOREIGN KEY (run_id) REFERENCES market_runs (run_id),
+                        UNIQUE(run_id, set_slug)
+                    )
+                ''')
+
+                # Create run_metadata table for weights and summary
+                await conn.execute('''
+                    CREATE TABLE IF NOT EXISTS run_metadata (
+                        run_id INTEGER PRIMARY KEY,
+                        profit_weight REAL NOT NULL,
+                        volume_weight REAL NOT NULL,
+                        total_sets INTEGER NOT NULL,
+                        profitable_sets INTEGER NOT NULL,
+                        FOREIGN KEY (run_id) REFERENCES market_runs (run_id)
+                    )
+                ''')
+
+                # Create index for scored_set_data
+                await conn.execute(
+                    'CREATE INDEX IF NOT EXISTS idx_scored_set_data_run_id ON scored_set_data(run_id)'
+                )
 
                 # Set schema version
                 await conn.execute(
@@ -514,6 +554,162 @@ class AsyncMarketDatabase:
                     stats['time_span_days'] = (time_range[1] - time_range[0]) / (24 * 3600)
 
                 return stats
+
+    async def save_full_analysis(
+        self,
+        run_id: int,
+        scored_data: List[Dict[str, Any]],
+        profit_weight: float,
+        volume_weight: float
+    ) -> None:
+        """Save full scored analysis data for a run.
+
+        Args:
+            run_id: The run ID to associate data with
+            scored_data: List of scored set data dictionaries
+            profit_weight: Profit weight used for scoring
+            volume_weight: Volume weight used for scoring
+        """
+        await self._ensure_initialized()
+
+        if not scored_data:
+            return
+
+        profitable_count = len([s for s in scored_data if s.get('profit_margin', 0) > 0])
+
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as conn:
+                try:
+                    # Save run metadata
+                    await conn.execute('''
+                        INSERT OR REPLACE INTO run_metadata
+                        (run_id, profit_weight, volume_weight, total_sets, profitable_sets)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (run_id, profit_weight, volume_weight, len(scored_data), profitable_count))
+
+                    # Batch insert scored set data
+                    records = []
+                    for item in scored_data:
+                        part_details_json = json.dumps(item.get('part_details', []))
+                        records.append((
+                            run_id,
+                            item.get('set_slug', ''),
+                            item.get('set_name', ''),
+                            item.get('set_price', 0),
+                            item.get('part_cost', 0),
+                            item.get('profit_margin', 0),
+                            item.get('profit_percentage', 0),
+                            item.get('volume', 0),
+                            item.get('normalized_profit', 0),
+                            item.get('normalized_volume', 0),
+                            item.get('profit_score', 0),
+                            item.get('volume_score', 0),
+                            item.get('total_score', 0),
+                            part_details_json
+                        ))
+
+                    await conn.executemany('''
+                        INSERT OR REPLACE INTO scored_set_data
+                        (run_id, set_slug, set_name, set_price, part_cost, profit_margin,
+                         profit_percentage, volume, normalized_profit, normalized_volume,
+                         profit_score, volume_score, total_score, part_details)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', records)
+
+                    await conn.commit()
+
+                except Exception as e:
+                    await conn.rollback()
+                    raise Exception(f"Failed to save full analysis: {e}")
+
+    async def get_full_analysis(self, run_id: int) -> Optional[Dict[str, Any]]:
+        """Get full scored analysis data for a run.
+
+        Args:
+            run_id: The run ID to fetch
+
+        Returns:
+            Dictionary with full analysis data or None if not found
+        """
+        await self._ensure_initialized()
+
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as conn:
+                # Get run info
+                cursor = await conn.execute(
+                    'SELECT run_id, timestamp, date_string FROM market_runs WHERE run_id = ?',
+                    (run_id,)
+                )
+                run_row = await cursor.fetchone()
+                if not run_row:
+                    return None
+
+                # Get run metadata (weights)
+                cursor = await conn.execute(
+                    'SELECT profit_weight, volume_weight, total_sets, profitable_sets FROM run_metadata WHERE run_id = ?',
+                    (run_id,)
+                )
+                metadata_row = await cursor.fetchone()
+
+                # Get scored set data
+                cursor = await conn.execute('''
+                    SELECT set_slug, set_name, set_price, part_cost, profit_margin,
+                           profit_percentage, volume, normalized_profit, normalized_volume,
+                           profit_score, volume_score, total_score, part_details
+                    FROM scored_set_data WHERE run_id = ?
+                    ORDER BY total_score DESC
+                ''', (run_id,))
+                set_rows = await cursor.fetchall()
+
+                # If no scored data exists, return None
+                if not set_rows:
+                    return None
+
+                # Build scored sets list
+                scored_sets = []
+                for row in set_rows:
+                    part_details = json.loads(row[12]) if row[12] else []
+                    scored_sets.append({
+                        'set_slug': row[0],
+                        'set_name': row[1],
+                        'set_price': row[2],
+                        'part_cost': row[3],
+                        'profit_margin': row[4],
+                        'profit_percentage': row[5],
+                        'volume': row[6],
+                        'normalized_profit': row[7],
+                        'normalized_volume': row[8],
+                        'profit_score': row[9],
+                        'volume_score': row[10],
+                        'total_score': row[11],
+                        'part_details': part_details
+                    })
+
+                # Build response
+                result = {
+                    'run_id': run_row[0],
+                    'timestamp': run_row[1],
+                    'date_string': run_row[2],
+                    'sets': scored_sets,
+                    'total_sets': len(scored_sets),
+                    'profitable_sets': len([s for s in scored_sets if s['profit_margin'] > 0])
+                }
+
+                # Add weights if available
+                if metadata_row:
+                    result['weights'] = {
+                        'profit_weight': metadata_row[0],
+                        'volume_weight': metadata_row[1]
+                    }
+                    result['total_sets'] = metadata_row[2]
+                    result['profitable_sets'] = metadata_row[3]
+                else:
+                    result['weights'] = {
+                        'profit_weight': 1.0,
+                        'volume_weight': 1.2
+                    }
+
+                return result
 
     async def vacuum_database(self) -> None:
         """Optimize database by running VACUUM operation."""
