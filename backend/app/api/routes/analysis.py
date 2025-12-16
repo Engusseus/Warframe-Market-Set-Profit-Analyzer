@@ -35,6 +35,7 @@ def get_analysis_service() -> AnalysisService:
 async def get_analysis(
     request: Request,
     force_refresh: bool = Query(False, description="Force fresh data fetch"),
+    test_mode: bool = Query(False, description="Run in test mode (limited data)"),
     profit_weight: float = Query(1.0, ge=0.0, le=10.0, description="Profit weight"),
     volume_weight: float = Query(1.2, ge=0.0, le=10.0, description="Volume weight")
 ) -> AnalysisResponse:
@@ -45,7 +46,7 @@ async def get_analysis(
     """
     logger = get_logger()
     logger.info(f"Analysis request received from {request.client.host if request.client else 'unknown'}")
-    logger.info(f"Request params: force_refresh={force_refresh}, profit_weight={profit_weight}, volume_weight={volume_weight}")
+    logger.info(f"Request params: force_refresh={force_refresh}, test_mode={test_mode}, profit_weight={profit_weight}, volume_weight={volume_weight}")
 
     service = get_analysis_service()
 
@@ -54,7 +55,8 @@ async def get_analysis(
         result = await service.run_full_analysis(
             profit_weight=profit_weight,
             volume_weight=volume_weight,
-            force_refresh=force_refresh
+            force_refresh=force_refresh,
+            test_mode=test_mode
         )
         logger.info(f"Analysis completed successfully, returning {result.total_sets} sets")
         return result
@@ -144,7 +146,7 @@ async def stream_analysis_progress(request: Request):
             current_status = status["status"]
 
             # Only send updates when there's a change
-            if current_progress != last_progress or current_message != last_message:
+            if current_progress != last_progress or current_message != last_message or current_status in ["completed", "error"]:
                 data = json.dumps({
                     "status": current_status,
                     "progress": current_progress,
@@ -157,19 +159,8 @@ async def stream_analysis_progress(request: Request):
                 last_progress = current_progress
                 last_message = current_message
 
-            # Stop streaming when analysis is complete or errored
-            if current_status in ("completed", "error", "idle"):
-                # Send final status
-                if current_status != "idle":
-                    data = json.dumps({
-                        "status": current_status,
-                        "progress": current_progress,
-                        "message": current_message,
-                        "run_id": status["run_id"],
-                        "error": status.get("error")
-                    })
-                    yield f"data: {data}\n\n"
-                break
+                if current_status in ["completed", "error"]:
+                    break
 
             # Poll interval - check status every 100ms
             await asyncio.sleep(0.1)

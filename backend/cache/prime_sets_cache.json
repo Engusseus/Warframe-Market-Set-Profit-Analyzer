@@ -1,0 +1,266 @@
+{
+  "prime_sets_hash": "f9022eec9415d0f426918734b3fc33ae253b9a818f1fdf4ce6404f074999e2ae",
+  "detailed_sets": [
+    {
+      "id": "5b2985e2eb069f04ea65b0f6",
+      "name": "Destreza Prime Set",
+      "slug": "destreza_prime_set",
+      "setParts": [
+        {
+          "code": "5b2985e0eb069f04ea65b0d8",
+          "name": "Destreza Prime Blade",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5b2985e3eb069f04ea65b0fb",
+          "name": "Destreza Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5b2985e3eb069f04ea65b0fd",
+          "name": "Destreza Prime Handle",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "56783f24cbfa8f0432dd8999",
+      "name": "Dual Kamas Prime Set",
+      "slug": "dual_kamas_prime_set",
+      "setParts": [
+        {
+          "code": "561536deb66f836f8bbaca47",
+          "name": "Dual Kamas Prime Blade",
+          "quantityInSet": 2
+        },
+        {
+          "code": "561536d5b66f836f889b79bb",
+          "name": "Dual Kamas Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "561536e4b66f836f8e15eb18",
+          "name": "Dual Kamas Prime Handle",
+          "quantityInSet": 2
+        }
+      ]
+    },
+    {
+      "id": "56783f24cbfa8f0432dd899c",
+      "name": "Frost Prime Set",
+      "slug": "frost_prime_set",
+      "setParts": [
+        {
+          "code": "54a73e65e779893a797fff80",
+          "name": "Frost Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "54a73e65e779893a797fff7d",
+          "name": "Frost Prime Chassis Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "54a73e65e779893a797fff6c",
+          "name": "Frost Prime Neuroptics Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "54a73e65e779893a797fff79",
+          "name": "Frost Prime Systems Blueprint",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "58b57068eb26db5c31192114",
+      "name": "Helios Prime Set",
+      "slug": "helios_prime_set",
+      "setParts": [
+        {
+          "code": "58b57068eb26db5c31192118",
+          "name": "Helios Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "58b57068eb26db5c31192116",
+          "name": "Helios Prime Carapace",
+          "quantityInSet": 1
+        },
+        {
+          "code": "58b57068eb26db5c31192115",
+          "name": "Helios Prime Cerebrum",
+          "quantityInSet": 1
+        },
+        {
+          "code": "58b57068eb26db5c31192117",
+          "name": "Helios Prime Systems",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "59a48b625cd9938cfede703c",
+      "name": "Hydroid Prime Set",
+      "slug": "hydroid_prime_set",
+      "setParts": [
+        {
+          "code": "59a48b625cd9938cfede7038",
+          "name": "Hydroid Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "59a48b625cd9938cfede703a",
+          "name": "Hydroid Prime Chassis Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "59a48b625cd9938cfede7039",
+          "name": "Hydroid Prime Neuroptics Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "59a48b625cd9938cfede703b",
+          "name": "Hydroid Prime Systems Blueprint",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "56c3bbea5d2f0202da32e93f",
+      "name": "Saryn Prime Set",
+      "slug": "saryn_prime_set",
+      "setParts": [
+        {
+          "code": "56c3bbd55d2f0202da32e93b",
+          "name": "Saryn Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "56c3bbe45d2f0202da32e93e",
+          "name": "Saryn Prime Chassis Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "56c3bbdb5d2f0202da32e93c",
+          "name": "Saryn Prime Neuroptics Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "56c3bbe05d2f0202da32e93d",
+          "name": "Saryn Prime Systems Blueprint",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "592dd262011e88f094afec8b",
+      "name": "Silva & Aegis Prime Set",
+      "slug": "silva_and_aegis_prime_set",
+      "setParts": [
+        {
+          "code": "592dd262011e88f094afec8a",
+          "name": "Silva & Aegis Prime Blade",
+          "quantityInSet": 1
+        },
+        {
+          "code": "592dd262011e88f094afec87",
+          "name": "Silva & Aegis Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "592dd262011e88f094afec88",
+          "name": "Silva & Aegis Prime Guard",
+          "quantityInSet": 1
+        },
+        {
+          "code": "592dd262011e88f094afec89",
+          "name": "Silva & Aegis Prime Hilt",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "5ca2866ffc2db2035eae059c",
+      "name": "Stradavar Prime Set",
+      "slug": "stradavar_prime_set",
+      "setParts": [
+        {
+          "code": "5ca2866ffc2db2035eae059b",
+          "name": "Stradavar Prime Barrel",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5ca28670fc2db2035eae05a7",
+          "name": "Stradavar Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5ca28670fc2db2035eae05a3",
+          "name": "Stradavar Prime Receiver",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5ca28670fc2db2035eae05a4",
+          "name": "Stradavar Prime Stock",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "56783f24cbfa8f0432dd89b0",
+      "name": "Vasto Prime Set",
+      "slug": "vasto_prime_set",
+      "setParts": [
+        {
+          "code": "54a73e65e779893a797fff65",
+          "name": "Vasto Prime Barrel",
+          "quantityInSet": 1
+        },
+        {
+          "code": "54a73e65e779893a797fff66",
+          "name": "Vasto Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "54a73e65e779893a797fff67",
+          "name": "Vasto Prime Receiver",
+          "quantityInSet": 1
+        }
+      ]
+    },
+    {
+      "id": "5d21ce49f4604c012d1e0c19",
+      "name": "Zhuge Prime Set",
+      "slug": "zhuge_prime_set",
+      "setParts": [
+        {
+          "code": "5d21ce43f4604c012d1e0c0d",
+          "name": "Zhuge Prime Barrel",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5d21ce47f4604c012d1e0c15",
+          "name": "Zhuge Prime Blueprint",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5d21ce43f4604c012d1e0c0e",
+          "name": "Zhuge Prime Grip",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5d21ce48f4604c012d1e0c17",
+          "name": "Zhuge Prime Receiver",
+          "quantityInSet": 1
+        },
+        {
+          "code": "5d21ce47f4604c012d1e0c14",
+          "name": "Zhuge Prime String",
+          "quantityInSet": 1
+        }
+      ]
+    }
+  ],
+  "last_updated": 1765916125.5046048
+}
