@@ -77,6 +77,9 @@ cache/*.json
 cache/*.cache
 cache/*.sqlite
 cache/*_export.json
+backend/cache/*.json
+backend/cache/*.sqlite
+backend/cache/*.cache
 
 # Database files (personal analysis data)
 *.sqlite
