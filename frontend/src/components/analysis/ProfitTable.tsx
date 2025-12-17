@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -183,9 +183,8 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
               const isPositive = set.profit_margin > 0;
 
               return (
-                <>
+                <Fragment key={set.set_slug}>
                   <tr
-                    key={set.set_slug}
                     className={clsx(
                       'hover:bg-dark-hover transition-colors cursor-pointer',
                       rank <= 3 && 'bg-mint/5',
@@ -316,7 +315,7 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               );
             })}
           </tbody>
