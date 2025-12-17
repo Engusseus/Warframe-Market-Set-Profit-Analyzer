@@ -115,6 +115,17 @@ class AsyncMarketDatabase:
                         volume_score REAL NOT NULL,
                         total_score REAL NOT NULL,
                         part_details TEXT NOT NULL,
+                        trend_slope REAL DEFAULT 0,
+                        trend_multiplier REAL DEFAULT 1.0,
+                        trend_direction TEXT DEFAULT 'stable',
+                        volatility REAL DEFAULT 0,
+                        volatility_penalty REAL DEFAULT 1.0,
+                        risk_level TEXT DEFAULT 'Medium',
+                        composite_score REAL DEFAULT 0,
+                        profit_contribution REAL DEFAULT 0,
+                        volume_contribution REAL DEFAULT 0,
+                        trend_contribution REAL DEFAULT 1.0,
+                        volatility_contribution REAL DEFAULT 1.0,
                         FOREIGN KEY (run_id) REFERENCES market_runs (run_id),
                         UNIQUE(run_id, set_slug)
                     )
@@ -128,6 +139,7 @@ class AsyncMarketDatabase:
                         volume_weight REAL NOT NULL,
                         total_sets INTEGER NOT NULL,
                         profitable_sets INTEGER NOT NULL,
+                        strategy TEXT DEFAULT 'balanced',
                         FOREIGN KEY (run_id) REFERENCES market_runs (run_id)
                     )
                 ''')
@@ -418,6 +430,60 @@ class AsyncMarketDatabase:
                 rows = await cursor.fetchall()
                 return [dict(zip(columns, row)) for row in rows]
 
+    async def get_price_history_batch(
+        self,
+        set_slugs: List[str],
+        days: int = 7
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch fetch historical price data for multiple sets.
+
+        This is more efficient than calling get_profit_trends() for each set
+        when calculating trend/volatility metrics for all sets.
+
+        Args:
+            set_slugs: List of set identifiers to fetch
+            days: Number of days to look back
+
+        Returns:
+            Dict mapping set_slug to list of {timestamp, lowest_price} entries
+        """
+        await self._ensure_initialized()
+
+        if not set_slugs:
+            return {}
+
+        cutoff_time = int(time.time()) - (days * 24 * 3600)
+
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as conn:
+                # Use parameterized query for the set_slugs
+                placeholders = ','.join('?' * len(set_slugs))
+                query = f'''
+                    SELECT
+                        sp.set_slug,
+                        mr.timestamp,
+                        sp.lowest_price
+                    FROM set_profits sp
+                    JOIN market_runs mr ON sp.run_id = mr.run_id
+                    WHERE sp.set_slug IN ({placeholders}) AND mr.timestamp >= ?
+                    ORDER BY sp.set_slug, mr.timestamp ASC
+                '''
+
+                cursor = await conn.execute(query, (*set_slugs, cutoff_time))
+                rows = await cursor.fetchall()
+
+                # Group results by set_slug
+                result: Dict[str, List[Dict[str, Any]]] = {slug: [] for slug in set_slugs}
+                for row in rows:
+                    set_slug, timestamp, lowest_price = row
+                    if set_slug in result:
+                        result[set_slug].append({
+                            'timestamp': timestamp,
+                            'lowest_price': lowest_price
+                        })
+
+                return result
+
     async def get_all_sets(self) -> List[Dict[str, Any]]:
         """Get all unique sets from database.
 
@@ -559,16 +625,18 @@ class AsyncMarketDatabase:
         self,
         run_id: int,
         scored_data: List[Dict[str, Any]],
-        profit_weight: float,
-        volume_weight: float
+        profit_weight: float = 1.0,
+        volume_weight: float = 1.2,
+        strategy: str = 'balanced'
     ) -> None:
         """Save full scored analysis data for a run.
 
         Args:
             run_id: The run ID to associate data with
             scored_data: List of scored set data dictionaries
-            profit_weight: Profit weight used for scoring
-            volume_weight: Volume weight used for scoring
+            profit_weight: Profit weight used for scoring (legacy)
+            volume_weight: Volume weight used for scoring (legacy)
+            strategy: Strategy type used for scoring
         """
         await self._ensure_initialized()
 
@@ -580,14 +648,14 @@ class AsyncMarketDatabase:
         async with self._lock:
             async with aiosqlite.connect(self.db_path) as conn:
                 try:
-                    # Save run metadata
+                    # Save run metadata with strategy
                     await conn.execute('''
                         INSERT OR REPLACE INTO run_metadata
-                        (run_id, profit_weight, volume_weight, total_sets, profitable_sets)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (run_id, profit_weight, volume_weight, len(scored_data), profitable_count))
+                        (run_id, profit_weight, volume_weight, total_sets, profitable_sets, strategy)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (run_id, profit_weight, volume_weight, len(scored_data), profitable_count, strategy))
 
-                    # Batch insert scored set data
+                    # Batch insert scored set data with new fields
                     records = []
                     for item in scored_data:
                         part_details_json = json.dumps(item.get('part_details', []))
@@ -605,15 +673,30 @@ class AsyncMarketDatabase:
                             item.get('profit_score', 0),
                             item.get('volume_score', 0),
                             item.get('total_score', 0),
-                            part_details_json
+                            part_details_json,
+                            item.get('trend_slope', 0),
+                            item.get('trend_multiplier', 1.0),
+                            item.get('trend_direction', 'stable'),
+                            item.get('volatility', 0),
+                            item.get('volatility_penalty', 1.0),
+                            item.get('risk_level', 'Medium'),
+                            item.get('composite_score', 0),
+                            item.get('profit_contribution', 0),
+                            item.get('volume_contribution', 0),
+                            item.get('trend_contribution', 1.0),
+                            item.get('volatility_contribution', 1.0)
                         ))
 
                     await conn.executemany('''
                         INSERT OR REPLACE INTO scored_set_data
                         (run_id, set_slug, set_name, set_price, part_cost, profit_margin,
                          profit_percentage, volume, normalized_profit, normalized_volume,
-                         profit_score, volume_score, total_score, part_details)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         profit_score, volume_score, total_score, part_details,
+                         trend_slope, trend_multiplier, trend_direction, volatility,
+                         volatility_penalty, risk_level, composite_score,
+                         profit_contribution, volume_contribution, trend_contribution,
+                         volatility_contribution)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', records)
 
                     await conn.commit()
@@ -644,20 +727,24 @@ class AsyncMarketDatabase:
                 if not run_row:
                     return None
 
-                # Get run metadata (weights)
+                # Get run metadata (weights and strategy)
                 cursor = await conn.execute(
-                    'SELECT profit_weight, volume_weight, total_sets, profitable_sets FROM run_metadata WHERE run_id = ?',
+                    'SELECT profit_weight, volume_weight, total_sets, profitable_sets, strategy FROM run_metadata WHERE run_id = ?',
                     (run_id,)
                 )
                 metadata_row = await cursor.fetchone()
 
-                # Get scored set data
+                # Get scored set data with new fields
                 cursor = await conn.execute('''
                     SELECT set_slug, set_name, set_price, part_cost, profit_margin,
                            profit_percentage, volume, normalized_profit, normalized_volume,
-                           profit_score, volume_score, total_score, part_details
+                           profit_score, volume_score, total_score, part_details,
+                           trend_slope, trend_multiplier, trend_direction, volatility,
+                           volatility_penalty, risk_level, composite_score,
+                           profit_contribution, volume_contribution, trend_contribution,
+                           volatility_contribution
                     FROM scored_set_data WHERE run_id = ?
-                    ORDER BY total_score DESC
+                    ORDER BY composite_score DESC
                 ''', (run_id,))
                 set_rows = await cursor.fetchall()
 
@@ -665,7 +752,7 @@ class AsyncMarketDatabase:
                 if not set_rows:
                     return None
 
-                # Build scored sets list
+                # Build scored sets list with new fields
                 scored_sets = []
                 for row in set_rows:
                     part_details = json.loads(row[12]) if row[12] else []
@@ -682,7 +769,18 @@ class AsyncMarketDatabase:
                         'profit_score': row[9],
                         'volume_score': row[10],
                         'total_score': row[11],
-                        'part_details': part_details
+                        'part_details': part_details,
+                        'trend_slope': row[13] if row[13] is not None else 0.0,
+                        'trend_multiplier': row[14] if row[14] is not None else 1.0,
+                        'trend_direction': row[15] if row[15] is not None else 'stable',
+                        'volatility': row[16] if row[16] is not None else 0.0,
+                        'volatility_penalty': row[17] if row[17] is not None else 1.0,
+                        'risk_level': row[18] if row[18] is not None else 'Medium',
+                        'composite_score': row[19] if row[19] is not None else row[11],
+                        'profit_contribution': row[20] if row[20] is not None else 0.0,
+                        'volume_contribution': row[21] if row[21] is not None else 0.0,
+                        'trend_contribution': row[22] if row[22] is not None else 1.0,
+                        'volatility_contribution': row[23] if row[23] is not None else 1.0
                     })
 
                 # Build response
@@ -695,19 +793,23 @@ class AsyncMarketDatabase:
                     'profitable_sets': len([s for s in scored_sets if s['profit_margin'] > 0])
                 }
 
-                # Add weights if available
+                # Add weights and strategy if available
                 if metadata_row:
                     result['weights'] = {
                         'profit_weight': metadata_row[0],
-                        'volume_weight': metadata_row[1]
+                        'volume_weight': metadata_row[1],
+                        'strategy': metadata_row[4] if metadata_row[4] else 'balanced'
                     }
                     result['total_sets'] = metadata_row[2]
                     result['profitable_sets'] = metadata_row[3]
+                    result['strategy'] = metadata_row[4] if metadata_row[4] else 'balanced'
                 else:
                     result['weights'] = {
                         'profit_weight': 1.0,
-                        'volume_weight': 1.2
+                        'volume_weight': 1.2,
+                        'strategy': 'balanced'
                     }
+                    result['strategy'] = 'balanced'
 
                 return result
 

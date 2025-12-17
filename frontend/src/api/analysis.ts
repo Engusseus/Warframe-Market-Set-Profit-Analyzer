@@ -1,16 +1,24 @@
 import apiClient from './client';
-import type { AnalysisResponse, AnalysisStatus, StatsResponse, HistoryResponse, RunDetail, SetDetail } from './types';
+import type {
+  AnalysisResponse,
+  AnalysisStatus,
+  StatsResponse,
+  HistoryResponse,
+  RunDetail,
+  SetDetail,
+  StrategyType,
+  StrategyProfile,
+  RescoreResponse,
+} from './types';
 
 export async function runAnalysis(
-  profitWeight: number = 1.0,
-  volumeWeight: number = 1.2,
+  strategy: StrategyType = 'balanced',
   forceRefresh: boolean = false,
   testMode: boolean = false
 ): Promise<AnalysisResponse> {
   const response = await apiClient.get<AnalysisResponse>('/analysis', {
     params: {
-      profit_weight: profitWeight,
-      volume_weight: volumeWeight,
+      strategy,
       force_refresh: forceRefresh,
       test_mode: testMode,
     },
@@ -24,15 +32,18 @@ export async function getAnalysisStatus(): Promise<AnalysisStatus> {
 }
 
 export async function rescoreAnalysis(
-  profitWeight: number,
-  volumeWeight: number
-): Promise<AnalysisResponse> {
-  const response = await apiClient.post<AnalysisResponse>('/analysis/rescore', null, {
+  strategy: StrategyType
+): Promise<RescoreResponse> {
+  const response = await apiClient.post<RescoreResponse>('/analysis/rescore', null, {
     params: {
-      profit_weight: profitWeight,
-      volume_weight: volumeWeight,
+      strategy,
     },
   });
+  return response.data;
+}
+
+export async function getStrategies(): Promise<StrategyProfile[]> {
+  const response = await apiClient.get<StrategyProfile[]>('/analysis/strategies');
   return response.data;
 }
 

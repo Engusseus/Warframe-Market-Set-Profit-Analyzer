@@ -1,3 +1,18 @@
+// Strategy Types
+export type StrategyType = 'safe_steady' | 'balanced' | 'aggressive';
+export type RiskLevel = 'Low' | 'Medium' | 'High';
+export type TrendDirection = 'rising' | 'falling' | 'stable';
+
+export interface StrategyProfile {
+  type: StrategyType;
+  name: string;
+  description: string;
+  volatility_weight: number;
+  trend_weight: number;
+  roi_weight: number;
+  min_volume_threshold: number;
+}
+
 // Part and Set Data Types
 export interface PartDetail {
   name: string;
@@ -21,10 +36,26 @@ export interface ScoredSet {
   profit_score: number;
   volume_score: number;
   total_score: number;
+  // Trend analysis fields
+  trend_slope: number;
+  trend_multiplier: number;
+  trend_direction: TrendDirection;
+  // Volatility/risk fields
+  volatility: number;
+  volatility_penalty: number;
+  risk_level: RiskLevel;
+  // Composite score (multiplicative formula)
+  composite_score: number;
+  // Score breakdown for UI display
+  profit_contribution: number;
+  volume_contribution: number;
+  trend_contribution: number;
+  volatility_contribution: number;
 }
 
 // Analysis Types
 export interface WeightsConfig {
+  strategy: StrategyType;
   profit_weight: number;
   volume_weight: number;
 }
@@ -36,6 +67,7 @@ export interface AnalysisResponse {
   total_sets: number;
   profitable_sets: number;
   weights: WeightsConfig;
+  strategy: StrategyType;
   cached: boolean;
 }
 
@@ -44,6 +76,14 @@ export interface AnalysisStatus {
   progress: number | null;
   message: string | null;
   run_id: number | null;
+}
+
+export interface RescoreResponse {
+  sets: ScoredSet[];
+  total_sets: number;
+  profitable_sets: number;
+  strategy: StrategyType;
+  weights: WeightsConfig;
 }
 
 // History Types

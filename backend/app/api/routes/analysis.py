@@ -1,18 +1,21 @@
 """Analysis API routes."""
 import asyncio
 import json
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from ...core.logging import get_logger
+from ...core.strategy_profiles import StrategyType
 from ...models.schemas import (
     AnalysisConfig,
     AnalysisResponse,
     AnalysisStartedResponse,
     AnalysisStatusResponse,
     ScoredData,
+    StrategyProfileResponse,
+    StrategyType as SchemaStrategyType,
     WeightsConfig,
 )
 from ...services.analysis_service import AnalysisService
@@ -36,25 +39,38 @@ async def get_analysis(
     request: Request,
     force_refresh: bool = Query(False, description="Force fresh data fetch"),
     test_mode: bool = Query(False, description="Run in test mode (limited data)"),
-    profit_weight: float = Query(1.0, ge=0.0, le=10.0, description="Profit weight"),
-    volume_weight: float = Query(1.2, ge=0.0, le=10.0, description="Volume weight")
+    strategy: str = Query("balanced", description="Trading strategy (safe_steady, balanced, aggressive)"),
+    # Legacy parameters for backward compatibility
+    profit_weight: float = Query(1.0, ge=0.0, le=10.0, description="Deprecated: Profit weight"),
+    volume_weight: float = Query(1.2, ge=0.0, le=10.0, description="Deprecated: Volume weight")
 ) -> AnalysisResponse:
-    """Get analysis results.
+    """Get analysis results with strategy-based scoring.
 
     If no recent analysis exists or force_refresh is True, runs a new analysis.
     Otherwise returns the latest cached analysis.
+
+    Available strategies:
+    - safe_steady: Low risk, prioritizes stable profits
+    - balanced: Equal consideration of all factors
+    - aggressive: High risk tolerance, prioritizes ROI and trends
     """
     logger = get_logger()
     logger.info(f"Analysis request received from {request.client.host if request.client else 'unknown'}")
-    logger.info(f"Request params: force_refresh={force_refresh}, test_mode={test_mode}, profit_weight={profit_weight}, volume_weight={volume_weight}")
+    logger.info(f"Request params: force_refresh={force_refresh}, test_mode={test_mode}, strategy={strategy}")
+
+    # Parse strategy
+    try:
+        strategy_type = StrategyType(strategy)
+    except ValueError:
+        strategy_type = StrategyType.BALANCED
+        logger.warning(f"Invalid strategy '{strategy}', defaulting to balanced")
 
     service = get_analysis_service()
 
     try:
-        # Run full analysis
+        # Run full analysis with strategy
         result = await service.run_full_analysis(
-            profit_weight=profit_weight,
-            volume_weight=volume_weight,
+            strategy=strategy_type,
             force_refresh=force_refresh,
             test_mode=test_mode
         )
@@ -87,12 +103,17 @@ async def trigger_analysis(
             detail="Analysis already in progress"
         )
 
+    # Convert schema strategy to core strategy
+    try:
+        strategy_type = StrategyType(config.strategy.value)
+    except (ValueError, AttributeError):
+        strategy_type = StrategyType.BALANCED
+
     # Start background analysis
     async def run_analysis():
         try:
             await service.run_full_analysis(
-                profit_weight=config.profit_weight,
-                volume_weight=config.volume_weight,
+                strategy=strategy_type,
                 force_refresh=config.force_refresh
             )
         except Exception:
@@ -178,16 +199,29 @@ async def stream_analysis_progress(request: Request):
 
 @router.post("/rescore")
 async def rescore_analysis(
-    profit_weight: float = Query(1.0, ge=0.0, le=10.0),
-    volume_weight: float = Query(1.2, ge=0.0, le=10.0)
+    strategy: str = Query("balanced", description="Trading strategy (safe_steady, balanced, aggressive)"),
+    # Legacy parameters for backward compatibility
+    profit_weight: float = Query(1.0, ge=0.0, le=10.0, description="Deprecated"),
+    volume_weight: float = Query(1.2, ge=0.0, le=10.0, description="Deprecated")
 ):
-    """Rescore existing analysis data with new weights.
+    """Rescore existing analysis data with a new strategy.
 
-    Does not fetch new data, just recalculates scores.
+    Does not fetch new data, just recalculates scores based on the selected strategy.
+
+    Available strategies:
+    - safe_steady: Low risk, prioritizes stable profits
+    - balanced: Equal consideration of all factors
+    - aggressive: High risk tolerance, prioritizes ROI and trends
     """
+    # Parse strategy
+    try:
+        strategy_type = StrategyType(strategy)
+    except ValueError:
+        strategy_type = StrategyType.BALANCED
+
     service = get_analysis_service()
 
-    result = await service.recalculate_scores(profit_weight, volume_weight)
+    result = await service.recalculate_scores(strategy=strategy_type)
 
     if result is None:
         raise HTTPException(
@@ -197,12 +231,39 @@ async def rescore_analysis(
 
     # Convert to response format
     scored_models = [ScoredData(**item) for item in result]
+    profitable_count = len([s for s in scored_models if s.profit_margin > 0])
 
     return {
         "sets": scored_models,
         "total_sets": len(scored_models),
+        "profitable_sets": profitable_count,
+        "strategy": strategy_type.value,
         "weights": WeightsConfig(
-            profit_weight=profit_weight,
-            volume_weight=volume_weight
+            strategy=SchemaStrategyType(strategy_type.value),
+            profit_weight=1.0,
+            volume_weight=1.2
         )
     }
+
+
+@router.get("/strategies", response_model=List[StrategyProfileResponse])
+async def get_strategies() -> List[StrategyProfileResponse]:
+    """Get all available trading strategies.
+
+    Returns a list of strategy profiles with their configurations.
+    """
+    service = get_analysis_service()
+    strategies = service.get_available_strategies()
+
+    return [
+        StrategyProfileResponse(
+            type=SchemaStrategyType(s['type']),
+            name=s['name'],
+            description=s['description'],
+            volatility_weight=s['volatility_weight'],
+            trend_weight=s['trend_weight'],
+            roi_weight=s['roi_weight'],
+            min_volume_threshold=s['min_volume_threshold']
+        )
+        for s in strategies
+    ]

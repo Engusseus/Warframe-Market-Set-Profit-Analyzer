@@ -6,7 +6,14 @@ import { Layout } from '../components/layout/Layout';
 import { Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { ProfitTable } from '../components/analysis/ProfitTable';
-import { WeightConfig } from '../components/analysis/WeightConfig';
+import { StrategySelector } from '../components/analysis/StrategySelector';
+import type { StrategyType } from '../api/types';
+
+const strategyNames: Record<StrategyType, string> = {
+  safe_steady: 'Safe & Steady',
+  balanced: 'Balanced',
+  aggressive: 'Aggressive Growth',
+};
 
 export function Analysis() {
   const {
@@ -14,14 +21,14 @@ export function Analysis() {
     setAnalysis,
     error,
     setError,
-    weights,
-    setWeights,
+    strategy,
+    setStrategy,
   } = useAnalysisStore();
 
   const [showFilters, setShowFilters] = useState(true);
   const [isRescoring, setIsRescoring] = useState(false);
 
-  const handleRescore = async (profitWeight: number, volumeWeight: number) => {
+  const handleStrategyChange = async (newStrategy: StrategyType) => {
     if (!currentAnalysis) {
       return;
     }
@@ -29,15 +36,16 @@ export function Analysis() {
     setIsRescoring(true);
     setError(null);
     try {
-      const result = await rescoreAnalysis(profitWeight, volumeWeight);
-      setWeights(profitWeight, volumeWeight);
+      const result = await rescoreAnalysis(newStrategy);
+      setStrategy(newStrategy);
       setAnalysis({
         ...currentAnalysis,
         sets: result.sets,
+        strategy: newStrategy,
         weights: result.weights,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Rescoring failed');
+      setError(err instanceof Error ? err.message : 'Strategy change failed');
     } finally {
       setIsRescoring(false);
     }
@@ -49,9 +57,9 @@ export function Analysis() {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold gradient-text">Analysis</h1>
+            <h1 className="text-3xl font-bold gradient-text">Trading Dashboard</h1>
             <p className="text-gray-400 mt-1">
-              Adjust scoring weights to find the best opportunities
+              Select a trading strategy to optimize your opportunities
             </p>
           </div>
           {currentAnalysis && (
@@ -60,7 +68,7 @@ export function Analysis() {
               variant="secondary"
               icon={<Filter className="w-4 h-4" />}
             >
-              {showFilters ? 'Hide' : 'Show'} Filters
+              {showFilters ? 'Hide' : 'Show'} Strategy
             </Button>
           )}
         </div>
@@ -78,10 +86,9 @@ export function Analysis() {
             {/* Sidebar */}
             {showFilters && (
               <div className="lg:col-span-1 space-y-4">
-                <WeightConfig
-                  profitWeight={weights.profit_weight}
-                  volumeWeight={weights.volume_weight}
-                  onApply={handleRescore}
+                <StrategySelector
+                  currentStrategy={strategy}
+                  onStrategyChange={handleStrategyChange}
                   loading={isRescoring}
                 />
 
@@ -90,6 +97,12 @@ export function Analysis() {
                     Current Analysis
                   </h4>
                   <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-500">Strategy</span>
+                      <span className="text-wf-purple">
+                        {strategyNames[currentAnalysis.strategy || strategy]}
+                      </span>
+                    </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Total Sets</span>
                       <span className="text-mint">{currentAnalysis.total_sets}</span>
@@ -104,18 +117,6 @@ export function Analysis() {
                       <span className="text-gray-500">Unprofitable</span>
                       <span className="text-profit-negative">
                         {currentAnalysis.total_sets - currentAnalysis.profitable_sets}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Profit Weight</span>
-                      <span className="text-mint">
-                        {currentAnalysis.weights.profit_weight.toFixed(1)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-500">Volume Weight</span>
-                      <span className="text-wf-blue">
-                        {currentAnalysis.weights.volume_weight.toFixed(1)}
                       </span>
                     </div>
                   </div>
@@ -134,7 +135,7 @@ export function Analysis() {
             <BarChart3 className="w-16 h-16 text-gray-600 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-200 mb-2">No Analysis Data</h3>
             <p className="text-gray-400">
-              Run an analysis from the Dashboard first to view and adjust results here.
+              Run an analysis from the Dashboard first to view and optimize results here.
             </p>
           </Card>
         )}

@@ -17,7 +17,7 @@ export function Dashboard() {
     setLoading,
     error,
     setError,
-    weights,
+    strategy,
     progress,
     progressMessage,
     setProgress,
@@ -46,12 +46,7 @@ export function Dashboard() {
     setProgress(0, 'Starting analysis...');
 
     try {
-      const result = await runAnalysis(
-        weights.profit_weight,
-        weights.volume_weight,
-        false,
-        testMode
-      );
+      const result = await runAnalysis(strategy, false, testMode);
       setAnalysis(result);
     } catch (err) {
       console.error('[Dashboard] Analysis failed', err);
@@ -59,7 +54,7 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [weights, setAnalysis, setError, setLoading, setProgress, testMode]);
+  }, [strategy, setAnalysis, setError, setLoading, setProgress, testMode]);
 
   const handleConnected = useCallback(() => {
     console.log('[Dashboard] SSE Connected. isInitiating:', isInitiating);

@@ -1,11 +1,201 @@
 """Profitability scoring algorithms.
 
-Extracted from main.py lines 928-1001.
+This module implements the multiplicative geometric scoring model:
+    Score = (Profit * log10(Volume)) * ROI * TrendMultiplier / VolatilityPenalty
+
+The scoring system supports strategy profiles that adjust how each factor
+contributes to the final score.
 """
+import math
 from typing import Any, Dict, List, Union
 
 from .normalization import normalize_data
+from .strategy_profiles import StrategyType, apply_strategy_weights, get_strategy_profile
+from .statistics import calculate_score_contributions
 from ..models.schemas import ScoredData
+
+
+def calculate_composite_score(
+    profit: float,
+    volume: int,
+    roi: float,
+    trend_multiplier: float,
+    volatility_penalty: float
+) -> float:
+    """Calculate the composite score using the multiplicative formula.
+
+    Golden Formula:
+        Score = (Profit * log10(Volume)) * ROI * TrendMultiplier / VolatilityPenalty
+
+    Args:
+        profit: Profit margin in platinum
+        volume: 48-hour trading volume
+        roi: Return on investment percentage
+        trend_multiplier: Trend multiplier [0.5, 1.5]
+        volatility_penalty: Volatility penalty [1.0, 2.0]
+
+    Returns:
+        The composite score. Can be negative for unprofitable items.
+    """
+    # Handle volume edge case - avoid log(0)
+    volume_factor = max(math.log10(max(volume, 1)), 0.1)
+
+    # Base score: profit * log(volume)
+    base_score = profit * volume_factor
+
+    # Apply ROI as a multiplier
+    roi_adjusted = base_score * (1.0 + roi / 100.0)
+
+    # Apply trend multiplier
+    trend_adjusted = roi_adjusted * trend_multiplier
+
+    # Apply volatility penalty
+    final_score = trend_adjusted / volatility_penalty
+
+    return final_score
+
+
+def calculate_profitability_scores_with_metrics(
+    profit_data: List[Dict[str, Any]],
+    volume_data: Union[Dict[str, Any], int, float, List[Dict[str, Any]]],
+    trend_volatility_metrics: Dict[str, Dict[str, Any]],
+    strategy: StrategyType = StrategyType.BALANCED
+) -> List[ScoredData]:
+    """Calculate profitability scores with trend and volatility metrics.
+
+    This is the main scoring function for the trading engine.
+
+    Args:
+        profit_data: List of profit analysis results (from calculate_profit_margins)
+        volume_data: Dict with 'individual' key mapping slugs to volumes
+        trend_volatility_metrics: Dict mapping set_slug to trend/volatility metrics
+        strategy: Trading strategy to apply
+
+    Returns:
+        List of ScoredData objects sorted by composite score (descending)
+    """
+    if not profit_data:
+        return []
+
+    profile = get_strategy_profile(strategy)
+
+    # Handle different volume data formats
+    volume_lookup: Dict[str, int] = {}
+
+    if isinstance(volume_data, dict) and 'individual' in volume_data:
+        volume_lookup = volume_data['individual'].copy()
+    elif isinstance(volume_data, (int, float)):
+        for item in profit_data:
+            volume_lookup[item['set_slug']] = 1
+    else:
+        if isinstance(volume_data, list):
+            for item in volume_data:
+                if isinstance(item, dict) and 'set_slug' in item:
+                    volume_lookup[item['set_slug']] = item.get('volume', 0)
+        else:
+            for item in profit_data:
+                volume_lookup[item['set_slug']] = 1
+
+    # Calculate scores for each item
+    scored_data = []
+    for profit_item in profit_data:
+        set_slug = profit_item['set_slug']
+        volume = volume_lookup.get(set_slug, 0)
+
+        # Skip items below volume threshold for this strategy
+        if volume < profile.min_volume_threshold:
+            continue
+
+        # Get trend/volatility metrics (use defaults if not available)
+        metrics = trend_volatility_metrics.get(set_slug, {})
+        trend_slope = metrics.get('trend_slope', 0.0)
+        trend_multiplier = metrics.get('trend_multiplier', 1.0)
+        trend_direction = metrics.get('trend_direction', 'stable')
+        volatility = metrics.get('volatility', 0.0)
+        volatility_penalty = metrics.get('volatility_penalty', 1.0)
+        risk_level = metrics.get('risk_level', 'Medium')
+        data_points = metrics.get('data_points', 0)
+
+        profit = profit_item['profit_margin']
+        roi = profit_item['profit_percentage']
+
+        # Calculate base score (profit * log(volume))
+        volume_factor = max(math.log10(max(volume, 1)), 0.1)
+        base_score = profit * volume_factor
+
+        # Apply strategy weights for composite score
+        composite_score = apply_strategy_weights(
+            base_score=base_score,
+            volatility_penalty=volatility_penalty,
+            trend_multiplier=trend_multiplier,
+            roi=roi,
+            strategy=strategy
+        )
+
+        # Calculate contributions for UI breakdown
+        profit_contrib, volume_contrib, roi_contrib, trend_contrib, vol_contrib = \
+            calculate_score_contributions(
+                profit=profit,
+                volume=volume,
+                roi=roi,
+                trend_multiplier=trend_multiplier,
+                volatility_penalty=volatility_penalty
+            )
+
+        # Handle part_details - could be dicts or Pydantic models
+        part_details = profit_item.get('part_details', [])
+        if part_details and hasattr(part_details[0], 'model_dump'):
+            part_details = [p.model_dump() for p in part_details]
+
+        # Calculate legacy normalized values for backward compatibility
+        # These will be recalculated after all items are processed
+
+        scored_data.append(ScoredData(
+            set_slug=set_slug,
+            set_name=profit_item['set_name'],
+            set_price=profit_item['set_price'],
+            part_cost=profit_item['part_cost'],
+            profit_margin=profit,
+            profit_percentage=roi,
+            part_details=part_details,
+            volume=volume,
+            # New composite scoring fields
+            trend_slope=trend_slope,
+            trend_multiplier=trend_multiplier,
+            trend_direction=trend_direction,
+            volatility=volatility,
+            volatility_penalty=volatility_penalty,
+            risk_level=risk_level,
+            composite_score=composite_score,
+            profit_contribution=profit_contrib,
+            volume_contribution=volume_contrib,
+            trend_contribution=trend_contrib,
+            volatility_contribution=vol_contrib,
+            # Legacy fields for backward compatibility
+            normalized_profit=0.0,  # Will be set below
+            normalized_volume=0.0,  # Will be set below
+            profit_score=0.0,       # Will be set below
+            volume_score=0.0,       # Will be set below
+            total_score=composite_score  # Mirror composite_score
+        ))
+
+    # Calculate legacy normalized scores for backward compatibility
+    if scored_data:
+        profit_values = [s.profit_margin for s in scored_data]
+        volume_values = [s.volume for s in scored_data]
+        normalized_profits = normalize_data(profit_values)
+        normalized_volumes = normalize_data(volume_values)
+
+        for i, item in enumerate(scored_data):
+            item.normalized_profit = normalized_profits[i]
+            item.normalized_volume = normalized_volumes[i]
+            item.profit_score = normalized_profits[i]
+            item.volume_score = normalized_volumes[i]
+
+    # Sort by composite score (descending)
+    scored_data.sort(key=lambda x: x.composite_score, reverse=True)
+
+    return scored_data
 
 
 def calculate_profitability_scores(
@@ -14,22 +204,21 @@ def calculate_profitability_scores(
     profit_weight: float = 1.0,
     volume_weight: float = 1.2
 ) -> List[ScoredData]:
-    """Calculate profitability scores combining profit and volume data.
+    """Calculate profitability scores using legacy additive method.
 
-    This is the weighted scoring algorithm that ranks sets by trading opportunity.
+    DEPRECATED: Use calculate_profitability_scores_with_metrics() instead.
+
+    This function is kept for backward compatibility. It uses the old additive
+    formula without trend/volatility metrics.
 
     Args:
-        profit_data: List of profit analysis results (from calculate_profit_margins)
-        volume_data: Dict with 'individual' key mapping slugs to volumes,
-                    or legacy format (int/float for total, or list)
+        profit_data: List of profit analysis results
+        volume_data: Dict with 'individual' key mapping slugs to volumes
         profit_weight: Weight for profit factor (default: 1.0)
         volume_weight: Weight for volume factor (default: 1.2)
 
     Returns:
         List of ScoredData objects sorted by total score (descending)
-
-    Formula:
-        total_score = (normalized_profit * profit_weight) + (normalized_volume * volume_weight)
     """
     if not profit_data:
         return []
@@ -38,21 +227,16 @@ def calculate_profitability_scores(
     volume_lookup: Dict[str, int] = {}
 
     if isinstance(volume_data, dict) and 'individual' in volume_data:
-        # New format with individual volumes
         volume_lookup = volume_data['individual'].copy()
     elif isinstance(volume_data, (int, float)):
-        # Legacy format - total volume only
-        # Set all volumes to 1 so they don't affect relative scoring
         for item in profit_data:
             volume_lookup[item['set_slug']] = 1
     else:
-        # Handle other legacy formats
         if isinstance(volume_data, list):
             for item in volume_data:
                 if isinstance(item, dict) and 'set_slug' in item:
                     volume_lookup[item['set_slug']] = item.get('volume', 0)
         else:
-            # Default to equal volumes
             for item in profit_data:
                 volume_lookup[item['set_slug']] = 1
 
@@ -76,7 +260,7 @@ def calculate_profitability_scores(
         volume_score = normalized_volumes[i] * volume_weight
         total_score = profit_score + volume_score
 
-        # Handle part_details - could be dicts or Pydantic models
+        # Handle part_details
         part_details = profit_item.get('part_details', [])
         if part_details and hasattr(part_details[0], 'model_dump'):
             part_details = [p.model_dump() for p in part_details]
@@ -94,7 +278,19 @@ def calculate_profitability_scores(
             normalized_volume=normalized_volumes[i],
             profit_score=profit_score,
             volume_score=volume_score,
-            total_score=total_score
+            total_score=total_score,
+            # New fields with defaults
+            trend_slope=0.0,
+            trend_multiplier=1.0,
+            trend_direction='stable',
+            volatility=0.0,
+            volatility_penalty=1.0,
+            risk_level='Medium',
+            composite_score=total_score,
+            profit_contribution=profit_item['profit_margin'],
+            volume_contribution=max(math.log10(max(volume_values[i], 1)), 0.1),
+            trend_contribution=1.0,
+            volatility_contribution=1.0
         ))
 
     # Sort by total score (descending)
@@ -109,11 +305,13 @@ def calculate_profitability_scores_dict(
     profit_weight: float = 1.0,
     volume_weight: float = 1.2
 ) -> List[Dict[str, Any]]:
-    """Calculate profitability scores returning dictionaries for backwards compatibility."""
+    """Calculate profitability scores returning dictionaries.
+
+    DEPRECATED: Use calculate_profitability_scores_with_metrics() instead.
+    """
     if not profit_data:
         return []
 
-    # Handle different volume data formats
     volume_lookup: Dict[str, int] = {}
 
     if isinstance(volume_data, dict) and 'individual' in volume_data:
@@ -154,12 +352,82 @@ def calculate_profitability_scores_dict(
             'normalized_volume': normalized_volumes[i],
             'profit_score': profit_score,
             'volume_score': volume_score,
-            'total_score': total_score
+            'total_score': total_score,
+            # New fields with defaults
+            'trend_slope': 0.0,
+            'trend_multiplier': 1.0,
+            'trend_direction': 'stable',
+            'volatility': 0.0,
+            'volatility_penalty': 1.0,
+            'risk_level': 'Medium',
+            'composite_score': total_score,
+            'profit_contribution': profit_item['profit_margin'],
+            'volume_contribution': max(math.log10(max(volume_values[i], 1)), 0.1),
+            'trend_contribution': 1.0,
+            'volatility_contribution': 1.0
         })
 
     scored_data.sort(key=lambda x: x['total_score'], reverse=True)
 
     return scored_data
+
+
+def recalculate_scores_with_strategy(
+    scored_data: List[Dict[str, Any]],
+    strategy: StrategyType
+) -> List[Dict[str, Any]]:
+    """Recalculate scores using a different strategy.
+
+    This allows rescoring without refetching data.
+
+    Args:
+        scored_data: Previously scored data with trend/volatility metrics
+        strategy: New strategy to apply
+
+    Returns:
+        Re-sorted list with new composite scores
+    """
+    if not scored_data:
+        return scored_data
+
+    profile = get_strategy_profile(strategy)
+    rescored_data = []
+
+    for item in scored_data:
+        item_copy = item.copy()
+
+        # Skip items below volume threshold
+        volume = item.get('volume', 0)
+        if volume < profile.min_volume_threshold:
+            continue
+
+        profit = item.get('profit_margin', 0)
+        roi = item.get('profit_percentage', 0)
+        trend_multiplier = item.get('trend_multiplier', 1.0)
+        volatility_penalty = item.get('volatility_penalty', 1.0)
+
+        # Calculate base score
+        volume_factor = max(math.log10(max(volume, 1)), 0.1)
+        base_score = profit * volume_factor
+
+        # Apply strategy weights
+        composite_score = apply_strategy_weights(
+            base_score=base_score,
+            volatility_penalty=volatility_penalty,
+            trend_multiplier=trend_multiplier,
+            roi=roi,
+            strategy=strategy
+        )
+
+        item_copy['composite_score'] = composite_score
+        item_copy['total_score'] = composite_score  # Mirror for backward compatibility
+
+        rescored_data.append(item_copy)
+
+    # Re-sort by composite score
+    rescored_data.sort(key=lambda x: x['composite_score'], reverse=True)
+
+    return rescored_data
 
 
 def recalculate_scores_with_new_weights(
@@ -168,6 +436,8 @@ def recalculate_scores_with_new_weights(
     old_weights: tuple
 ) -> List[Dict[str, Any]]:
     """Recalculate profitability scores with new weights.
+
+    DEPRECATED: Use recalculate_scores_with_strategy() instead.
 
     Args:
         scored_data: Previously scored data
@@ -207,6 +477,7 @@ def recalculate_scores_with_new_weights(
         item_copy['profit_score'] = profit_score
         item_copy['volume_score'] = volume_score
         item_copy['total_score'] = total_score
+        item_copy['composite_score'] = total_score  # Mirror for compatibility
 
         rescored_data.append(item_copy)
 
