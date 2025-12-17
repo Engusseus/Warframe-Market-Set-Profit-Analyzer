@@ -4,7 +4,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6+-3178c6.svg)](https://www.typescriptlang.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-3178c6.svg)](https://www.typescriptlang.org/)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com/)
 
 A modern full-stack web application for analyzing Prime set profitability in Warframe using real-time market data from [Warframe Market](https://warframe.market). Features an interactive dark-themed dashboard with charts, real-time analysis progress, and historical trend tracking.
@@ -171,8 +171,10 @@ Warframe-Market-Set-Profit-Analyzer/
 |--------|----------|-------------|
 | `GET` | `/api/analysis` | Get latest analysis or run new if none exists |
 | `POST` | `/api/analysis` | Trigger background analysis |
-| `GET` | `/api/analysis/status` | Get analysis progress (SSE stream) |
+| `GET` | `/api/analysis/status` | Get current analysis status (JSON) |
+| `GET` | `/api/analysis/progress` | Stream analysis progress (SSE) |
 | `POST` | `/api/analysis/rescore` | Rescore results with new strategy |
+| `GET` | `/api/analysis/strategies` | List available strategy profiles |
 
 ### Data Endpoints
 
