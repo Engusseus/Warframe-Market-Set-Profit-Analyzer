@@ -1,8 +1,32 @@
 """Pydantic models for request/response schemas."""
 from datetime import datetime
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+
+# === Enums ===
+
+class StrategyType(str, Enum):
+    """Available trading strategy types."""
+    SAFE_STEADY = "safe_steady"
+    BALANCED = "balanced"
+    AGGRESSIVE = "aggressive"
+
+
+class RiskLevel(str, Enum):
+    """Risk level classification."""
+    LOW = "Low"
+    MEDIUM = "Medium"
+    HIGH = "High"
+
+
+class TrendDirection(str, Enum):
+    """Trend direction classification."""
+    RISING = "rising"
+    FALLING = "falling"
+    STABLE = "stable"
 
 
 # === Part and Set Data Models ===
@@ -73,28 +97,58 @@ class ProfitData(BaseModel):
 
 
 class ScoredData(ProfitData):
-    """Scored profit data with normalized values."""
+    """Scored profit data with normalized values and trend/volatility metrics."""
     volume: int = 0
     normalized_profit: float = 0.0
     normalized_volume: float = 0.0
     profit_score: float = 0.0
     volume_score: float = 0.0
     total_score: float = 0.0
+    # Trend analysis fields
+    trend_slope: float = 0.0
+    trend_multiplier: float = 1.0
+    trend_direction: str = "stable"
+    # Volatility/risk fields
+    volatility: float = 0.0
+    volatility_penalty: float = 1.0
+    risk_level: str = "Medium"
+    # Composite score (multiplicative formula)
+    composite_score: float = 0.0
+    # Score breakdown for UI display
+    profit_contribution: float = 0.0
+    volume_contribution: float = 0.0
+    trend_contribution: float = 1.0
+    volatility_contribution: float = 1.0
 
 
 # === API Request/Response Models ===
 
 class AnalysisConfig(BaseModel):
     """Configuration for running analysis."""
+    strategy: StrategyType = StrategyType.BALANCED
+    force_refresh: bool = False
+    # Legacy fields for backward compatibility
     profit_weight: float = Field(default=1.0, ge=0.0, le=10.0)
     volume_weight: float = Field(default=1.2, ge=0.0, le=10.0)
-    force_refresh: bool = False
 
 
 class WeightsConfig(BaseModel):
     """Scoring weights configuration."""
+    strategy: StrategyType = StrategyType.BALANCED
+    # Legacy fields for backward compatibility
     profit_weight: float = 1.0
     volume_weight: float = 1.2
+
+
+class StrategyProfileResponse(BaseModel):
+    """Strategy profile information."""
+    type: StrategyType
+    name: str
+    description: str
+    volatility_weight: float
+    trend_weight: float
+    roi_weight: float
+    min_volume_threshold: int
 
 
 class AnalysisResponse(BaseModel):
@@ -105,6 +159,7 @@ class AnalysisResponse(BaseModel):
     total_sets: int
     profitable_sets: int
     weights: WeightsConfig
+    strategy: StrategyType = StrategyType.BALANCED
     cached: bool = False
 
 

@@ -1,6 +1,7 @@
 """Analysis service for orchestrating market analysis.
 
-This service coordinates the entire analysis workflow.
+This service coordinates the entire analysis workflow with the multiplicative
+scoring model and strategy profiles.
 """
 import asyncio
 from datetime import datetime
@@ -10,11 +11,19 @@ from ..config import get_settings
 from ..core.cache_manager import CacheManager
 from ..core.logging import get_logger
 from ..core.profit_calculator import calculate_profit_margins_dict
-from ..core.scoring import calculate_profitability_scores_dict, recalculate_scores_with_new_weights
+from ..core.scoring import (
+    calculate_profitability_scores_dict,
+    calculate_profitability_scores_with_metrics,
+    recalculate_scores_with_new_weights,
+    recalculate_scores_with_strategy,
+)
+from ..core.statistics import calculate_metrics_from_history
+from ..core.strategy_profiles import StrategyType, get_all_strategies
 from ..db.database import AsyncMarketDatabase
 from ..models.schemas import (
     AnalysisResponse,
     ScoredData,
+    StrategyType as SchemaStrategyType,
     WeightsConfig,
 )
 from .warframe_market import WarframeMarketService
@@ -54,6 +63,7 @@ class AnalysisService:
         self.status = AnalysisStatus()
         self._current_data: Optional[List[Dict[str, Any]]] = None
         self._current_weights: Optional[Tuple[float, float]] = None
+        self._current_strategy: StrategyType = StrategyType.BALANCED
 
     async def get_database(self) -> AsyncMarketDatabase:
         """Get or create database instance."""
@@ -74,20 +84,23 @@ class AnalysisService:
 
     async def run_full_analysis(
         self,
-        profit_weight: float = 1.0,
-        volume_weight: float = 1.2,
+        strategy: StrategyType = StrategyType.BALANCED,
         force_refresh: bool = False,
         test_mode: bool = False,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        # Legacy parameters for backward compatibility
+        profit_weight: float = 1.0,
+        volume_weight: float = 1.2,
     ) -> AnalysisResponse:
-        """Run complete market analysis.
+        """Run complete market analysis with strategy-based scoring.
 
         Args:
-            profit_weight: Weight for profit scoring
-            volume_weight: Weight for volume scoring
+            strategy: Trading strategy to use for scoring
             force_refresh: Force fresh data fetch even if cache is valid
             test_mode: If True, only fetch a small subset of data for testing
             progress_callback: Optional callback for progress updates
+            profit_weight: Legacy weight parameter (ignored, kept for compatibility)
+            volume_weight: Legacy weight parameter (ignored, kept for compatibility)
 
         Returns:
             AnalysisResponse with scored data
@@ -95,7 +108,7 @@ class AnalysisService:
         logger = get_logger()
         logger.info("=" * 50)
         logger.info("Starting full analysis")
-        logger.info(f"Parameters: profit_weight={profit_weight}, volume_weight={volume_weight}, force_refresh={force_refresh}, test_mode={test_mode}")
+        logger.info(f"Parameters: strategy={strategy.value}, force_refresh={force_refresh}, test_mode={test_mode}")
         self._update_status("running", 0, "Starting analysis...")
 
         try:
@@ -222,7 +235,7 @@ class AnalysisService:
 
             # Step 6: Calculate profit margins
             logger.info("Step 6: Calculating profit margins...")
-            self._update_status("running", 90, "Calculating profits...")
+            self._update_status("running", 80, "Calculating profits...")
             profit_data = calculate_profit_margins_dict(
                 set_prices, part_prices, detailed_sets
             )
@@ -232,23 +245,50 @@ class AnalysisService:
                 raise Exception("No profitable sets found")
             logger.info(f"Calculated profit margins for {len(profit_data)} sets")
 
-            # Step 7: Calculate scores
-            logger.info("Step 7: Calculating scores...")
-            self._update_status("running", 95, "Calculating scores...")
-            scored_data = calculate_profitability_scores_dict(
-                profit_data, volume_data, profit_weight, volume_weight
+            # Step 7: Calculate trend and volatility metrics from historical data
+            logger.info("Step 7: Calculating trend and volatility metrics...")
+            self._update_status("running", 85, "Analyzing price trends...")
+
+            db = await self.get_database()
+            set_slugs = [item['set_slug'] for item in profit_data]
+
+            # Batch fetch 7-day price history for all sets
+            historical_data = await db.get_price_history_batch(set_slugs, days=7)
+
+            # Calculate metrics for each set
+            trend_volatility_metrics: Dict[str, Dict[str, Any]] = {}
+            for set_slug in set_slugs:
+                history = historical_data.get(set_slug, [])
+                metrics = calculate_metrics_from_history(history)
+                trend_volatility_metrics[set_slug] = metrics
+
+            logger.info(f"Calculated trend/volatility metrics for {len(trend_volatility_metrics)} sets")
+
+            # Step 8: Calculate composite scores with strategy
+            logger.info(f"Step 8: Calculating composite scores with {strategy.value} strategy...")
+            self._update_status("running", 92, f"Applying {strategy.value} strategy...")
+
+            scored_models = calculate_profitability_scores_with_metrics(
+                profit_data,
+                volume_data,
+                trend_volatility_metrics,
+                strategy
             )
-            logger.info(f"Calculated scores for {len(scored_data)} sets")
+
+            # Convert to dict format for storage and rescoring
+            scored_data = [s.model_dump() for s in scored_models]
+            logger.info(f"Calculated composite scores for {len(scored_data)} sets")
 
             # Store current data for rescoring
             self._current_data = scored_data
-            self._current_weights = (profit_weight, volume_weight)
+            self._current_weights = (1.0, 1.2)  # Legacy
+            self._current_strategy = strategy
 
-            # Step 8: Save to database
-            logger.info("Step 8: Saving to database...")
+            # Step 9: Save to database
+            logger.info("Step 9: Saving to database...")
+            self._update_status("running", 96, "Saving results...")
             run_id = None
             try:
-                db = await self.get_database()
                 run_id = await db.save_market_run(profit_data, set_prices)
                 self.status.run_id = run_id
                 logger.info(f"Saved analysis run to database with ID: {run_id}")
@@ -257,8 +297,9 @@ class AnalysisService:
                 await db.save_full_analysis(
                     run_id,
                     scored_data,
-                    profit_weight,
-                    volume_weight
+                    profit_weight=1.0,
+                    volume_weight=1.2,
+                    strategy=strategy.value
                 )
                 logger.info(f"Saved full analysis data for run {run_id}")
             except Exception as e:
@@ -267,9 +308,6 @@ class AnalysisService:
 
             # Convert to response
             self._update_status("completed", 100, "Analysis complete!")
-
-            # Convert dict data to ScoredData models
-            scored_models = [ScoredData(**item) for item in scored_data]
 
             profitable_count = len([s for s in scored_models if s.profit_margin > 0])
             logger.info("=" * 50)
@@ -283,9 +321,11 @@ class AnalysisService:
                 total_sets=len(scored_models),
                 profitable_sets=profitable_count,
                 weights=WeightsConfig(
-                    profit_weight=profit_weight,
-                    volume_weight=volume_weight
+                    strategy=SchemaStrategyType(strategy.value),
+                    profit_weight=1.0,
+                    volume_weight=1.2
                 ),
+                strategy=SchemaStrategyType(strategy.value),
                 cached=cache_valid
             )
 
@@ -346,14 +386,17 @@ class AnalysisService:
 
     async def recalculate_scores(
         self,
-        profit_weight: float,
-        volume_weight: float
+        strategy: StrategyType = StrategyType.BALANCED,
+        # Legacy parameters
+        profit_weight: float = 1.0,
+        volume_weight: float = 1.2
     ) -> Optional[List[Dict[str, Any]]]:
-        """Recalculate scores with new weights using current data.
+        """Recalculate scores with a new strategy using current data.
 
         Args:
-            profit_weight: New profit weight
-            volume_weight: New volume weight
+            strategy: New strategy to apply
+            profit_weight: Legacy parameter (ignored)
+            volume_weight: Legacy parameter (ignored)
 
         Returns:
             Rescored data list or None if no current data
@@ -361,19 +404,23 @@ class AnalysisService:
         if self._current_data is None:
             return None
 
-        new_weights = (profit_weight, volume_weight)
-        old_weights = self._current_weights or (1.0, 1.2)
-
-        rescored = recalculate_scores_with_new_weights(
+        rescored = recalculate_scores_with_strategy(
             self._current_data,
-            new_weights,
-            old_weights
+            strategy
         )
 
         self._current_data = rescored
-        self._current_weights = new_weights
+        self._current_strategy = strategy
 
         return rescored
+
+    def get_available_strategies(self) -> List[Dict[str, Any]]:
+        """Get all available trading strategies.
+
+        Returns:
+            List of strategy profile dictionaries
+        """
+        return get_all_strategies()
 
     def get_status(self) -> Dict[str, Any]:
         """Get current analysis status.
