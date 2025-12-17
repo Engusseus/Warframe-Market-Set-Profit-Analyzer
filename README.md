@@ -4,8 +4,24 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.6+-3178c6.svg)](https://www.typescriptlang.org/)
+[![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com/)
 
-A modern full-stack web application for analyzing Prime set profitability in Warframe using real-time market data from [Warframe Market](https://warframe.market). Features a beautiful dark-themed dashboard with interactive charts, real-time analysis, and historical trend tracking.
+A modern full-stack web application for analyzing Prime set profitability in Warframe using real-time market data from [Warframe Market](https://warframe.market). Features an interactive dark-themed dashboard with charts, real-time analysis progress, and historical trend tracking.
+
+## Table of Contents
+
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Quick Start](#quick-start)
+- [Docker Deployment](#docker-deployment)
+- [Project Structure](#project-structure)
+- [API Reference](#api-reference)
+- [Configuration](#configuration)
+- [Tech Stack](#tech-stack)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
 
 ## Features
 
@@ -14,24 +30,30 @@ A modern full-stack web application for analyzing Prime set profitability in War
 - **48-Hour Volume Analysis**: Trading volume data to identify active vs. stagnant markets
 - **Comprehensive Market Coverage**: Analyzes all available Prime sets automatically
 - **Historical Data Tracking**: SQLite database tracks profit and price trends over time
+- **Progress Streaming**: Real-time SSE updates during analysis
 
 ### Interactive Dashboard
-- **Beautiful Dark Theme**: Custom color scheme (#080206, #9FBCAD, #7A9DB1, #9681AC)
+- **Dark Theme UI**: Custom color scheme optimized for extended use
 - **Profit Charts**: Visual bar charts of top profitable sets
 - **Volume Charts**: Trading activity visualization
-- **Sortable Tables**: Click to sort by score, profit, volume, or ROI
+- **Sortable Tables**: Sort by score, profit, volume, or ROI
 - **Expandable Rows**: Detailed part breakdown for each set
 
 ### Advanced Scoring System
-- **Weighted Scoring Algorithm**: Combines profit and volume with customizable weights
+- **Geometric Scoring Model**: Multiplicative algorithm combining profit and volume metrics
+- **Strategy Profiles**: Balanced, Profit Focus, High Volume, Quick Flip, Safe Investment
 - **Real-Time Rescoring**: Apply new weights without re-fetching data
-- **Preset Strategies**: Balanced, Profit Focus, Volume Focus
-- **Interactive Sliders**: Easy weight adjustment
+- **Interactive Configuration**: Easy weight adjustment through UI
 
 ### Full REST API
 - **FastAPI Backend**: Modern async Python API
 - **OpenAPI Documentation**: Auto-generated at `/docs`
 - **Background Tasks**: Long-running analysis runs asynchronously
+- **Export Capabilities**: JSON export of all analysis data
+
+## Screenshots
+
+> *Screenshots can be added by placing images in a `/screenshots` directory and updating this section*
 
 ## Quick Start
 
@@ -58,7 +80,7 @@ A modern full-stack web application for analyzing Prime set profitability in War
    ```
    Backend runs at http://localhost:8000
 
-3. **Start the Frontend**
+3. **Start the Frontend** (in a new terminal)
    ```bash
    cd frontend
    npm install
@@ -66,15 +88,37 @@ A modern full-stack web application for analyzing Prime set profitability in War
    ```
    Frontend runs at http://localhost:5173
 
-### Docker Deployment
+4. **Open the application**
+
+   Navigate to http://localhost:5173 in your browser.
+
+## Docker Deployment
+
+Deploy the entire stack with Docker Compose:
 
 ```bash
+# Build and start containers
 docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop containers
+docker-compose down
 ```
 
-This starts:
-- Backend API at http://localhost:8000
-- Frontend at http://localhost:80
+Services:
+- **Frontend**: http://localhost:80
+- **Backend API**: http://localhost:8000
+- **API Documentation**: http://localhost:8000/docs
+
+### Environment Variables
+
+Copy `.env.example` to `.env` and configure as needed:
+
+```bash
+cp .env.example .env
+```
 
 ## Project Structure
 
@@ -83,119 +127,147 @@ Warframe-Market-Set-Profit-Analyzer/
 ├── backend/
 │   ├── app/
 │   │   ├── api/routes/        # FastAPI endpoints
-│   │   │   ├── analysis.py    # /api/analysis
-│   │   │   ├── history.py     # /api/history
-│   │   │   ├── sets.py        # /api/sets
-│   │   │   ├── stats.py       # /api/stats
-│   │   │   └── export.py      # /api/export
+│   │   │   ├── analysis.py    # /api/analysis - run analysis, get results
+│   │   │   ├── history.py     # /api/history - historical runs
+│   │   │   ├── sets.py        # /api/sets - set information
+│   │   │   ├── stats.py       # /api/stats - database statistics
+│   │   │   └── export.py      # /api/export - data export
 │   │   ├── core/              # Business logic
-│   │   │   ├── rate_limiter.py
-│   │   │   ├── profit_calculator.py
-│   │   │   ├── scoring.py
-│   │   │   └── normalization.py
-│   │   ├── services/          # API clients
-│   │   │   ├── warframe_market.py
-│   │   │   └── analysis_service.py
+│   │   │   ├── scoring.py     # Geometric scoring engine
+│   │   │   ├── strategy_profiles.py  # Trading strategies
+│   │   │   ├── profit_calculator.py  # Margin calculations
+│   │   │   ├── rate_limiter.py       # API throttling
+│   │   │   └── cache_manager.py      # Data caching
+│   │   ├── services/          # External integrations
+│   │   │   ├── warframe_market.py    # Market API client
+│   │   │   └── analysis_service.py   # Analysis orchestration
 │   │   ├── models/schemas.py  # Pydantic models
-│   │   ├── db/database.py     # Async SQLite
-│   │   ├── config.py          # Settings
-│   │   └── main.py            # FastAPI app
+│   │   ├── db/database.py     # Async SQLite operations
+│   │   ├── config.py          # Settings management
+│   │   └── main.py            # FastAPI application
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
 │   │   ├── api/               # API client & types
 │   │   ├── components/        # React components
-│   │   │   ├── layout/
-│   │   │   ├── analysis/
-│   │   │   ├── charts/
-│   │   │   └── common/
-│   │   ├── pages/             # Page components
-│   │   ├── store/             # Zustand state
-│   │   └── App.tsx
+│   │   │   ├── layout/        # Header, Layout
+│   │   │   ├── analysis/      # ProfitTable, ScoreBreakdown
+│   │   │   ├── charts/        # ProfitChart
+│   │   │   └── common/        # Button, Card, Loading
+│   │   ├── pages/             # Dashboard, Analysis, History, Export
+│   │   ├── hooks/             # useAnalysisProgress
+│   │   ├── store/             # Zustand state management
+│   │   └── App.tsx            # Root component
 │   ├── package.json
+│   ├── nginx.conf             # Production server config
 │   └── Dockerfile
-├── cache/                     # Data persistence
+├── cache/                     # Runtime data (gitignored)
 ├── docker-compose.yml
-└── .env.example
+├── .env.example
+└── LICENSE
 ```
 
-## API Endpoints
+## API Reference
+
+### Analysis Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/analysis` | Run or get latest analysis |
-| POST | `/api/analysis` | Trigger background analysis |
-| GET | `/api/analysis/status` | Get analysis progress |
-| POST | `/api/analysis/rescore` | Rescore with new weights |
-| GET | `/api/history` | List historical runs |
-| GET | `/api/history/{run_id}` | Get run details |
-| GET | `/api/sets` | List all sets |
-| GET | `/api/sets/{slug}` | Get set details |
-| GET | `/api/stats` | Database statistics |
-| GET | `/api/export` | Export all data |
+| `GET` | `/api/analysis` | Get latest analysis or run new if none exists |
+| `POST` | `/api/analysis` | Trigger background analysis |
+| `GET` | `/api/analysis/status` | Get analysis progress (SSE stream) |
+| `POST` | `/api/analysis/rescore` | Rescore results with new strategy |
+
+### Data Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/history` | List all historical analysis runs |
+| `GET` | `/api/history/{run_id}` | Get specific run details |
+| `GET` | `/api/sets` | List all known Prime sets |
+| `GET` | `/api/sets/{slug}` | Get specific set details |
+| `GET` | `/api/stats` | Database statistics |
+| `GET` | `/api/export` | Export all data as JSON |
+
+### API Documentation
+
+Interactive API documentation is available at:
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
 ## Configuration
 
 ### Environment Variables
 
-Create a `.env` file in the backend directory:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEBUG` | `false` | Enable debug logging |
+| `DATABASE_PATH` | `cache/market_runs.sqlite` | SQLite database location |
+| `CACHE_DIR` | `cache` | Cache directory path |
+| `RATE_LIMIT_REQUESTS` | `3` | Max requests per window |
+| `RATE_LIMIT_WINDOW` | `1.0` | Rate limit window (seconds) |
+| `DEFAULT_PROFIT_WEIGHT` | `1.0` | Default profit weight |
+| `DEFAULT_VOLUME_WEIGHT` | `1.2` | Default volume weight |
+| `CORS_ORIGINS` | `http://localhost:5173,...` | Allowed CORS origins |
 
-```env
-DEBUG=false
-DATABASE_PATH=cache/market_runs.sqlite
-RATE_LIMIT_REQUESTS=3
-RATE_LIMIT_WINDOW=1.0
-DEFAULT_PROFIT_WEIGHT=1.0
-DEFAULT_VOLUME_WEIGHT=1.2
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
-```
+### Strategy Profiles
 
-### Scoring Weights
-
-| Strategy | Profit Weight | Volume Weight | Use Case |
-|----------|---------------|---------------|----------|
-| Balanced | 1.0 | 1.2 | Default, good for most users |
-| Profit Focus | 1.5 | 0.8 | Maximize profit margins |
-| Volume Focus | 0.8 | 1.5 | Prioritize liquid markets |
+| Strategy | Description | Best For |
+|----------|-------------|----------|
+| **Balanced** | Equal weight to profit and volume | General use |
+| **Profit Focus** | Maximizes profit margins | High-value traders |
+| **High Volume** | Prioritizes liquid markets | Quick turnover |
+| **Quick Flip** | Fast-moving items | Active traders |
+| **Safe Investment** | Stable, consistent items | Risk-averse traders |
 
 ## Tech Stack
 
 ### Backend
-- **FastAPI** - Modern async Python framework
-- **Pydantic** - Data validation
-- **httpx** - Async HTTP client
-- **aiosqlite** - Async SQLite
-- **uvicorn** - ASGI server
+- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern async Python web framework
+- **[Pydantic](https://docs.pydantic.dev/)** - Data validation and settings
+- **[httpx](https://www.python-httpx.org/)** - Async HTTP client
+- **[aiosqlite](https://aiosqlite.omnilib.dev/)** - Async SQLite database
+- **[uvicorn](https://www.uvicorn.org/)** - ASGI server
 
 ### Frontend
-- **React 19** - UI framework
-- **TypeScript** - Type safety
-- **Vite** - Build tool
-- **Tailwind CSS** - Styling
-- **Zustand** - State management
-- **TanStack Query** - Data fetching
-- **Recharts** - Charts
-- **React Router** - Routing
+- **[React 19](https://react.dev/)** - UI framework
+- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript
+- **[Vite](https://vitejs.dev/)** - Build tool and dev server
+- **[Tailwind CSS](https://tailwindcss.com/)** - Utility-first styling
+- **[Zustand](https://zustand-demo.pmnd.rs/)** - Lightweight state management
+- **[TanStack Query](https://tanstack.com/query/)** - Server state management
+- **[Recharts](https://recharts.org/)** - Chart library
+- **[React Router](https://reactrouter.com/)** - Client-side routing
+
+### Infrastructure
+- **[Docker](https://www.docker.com/)** - Containerization
+- **[Nginx](https://nginx.org/)** - Reverse proxy and static serving
 
 ## Contributing
 
-We welcome contributions! Key areas:
-- Additional analysis metrics
-- More chart types
+Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on:
+
+- Setting up the development environment
+- Code style and conventions
+- Pull request process
+- Areas where help is needed
+
+### Quick Contribution Ideas
+- Add test coverage (pytest for backend, Vitest for frontend)
 - Performance optimizations
-- Test coverage
-- Documentation
+- New analysis metrics or visualizations
+- Documentation improvements
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
-- [Warframe Market](https://warframe.market) for the excellent API
+- [Warframe Market](https://warframe.market) for providing the excellent public API
 - [Digital Extremes](https://www.digitalextremes.com/) for creating Warframe
-- The Warframe trading community
+- The Warframe trading community for inspiration
 
 ---
 
