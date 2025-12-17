@@ -68,12 +68,15 @@ function RiskBadge({ level }: { level: string }) {
   );
 }
 
-export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProps) {
+export function ProfitTable({ sets = [], onSelectSet: _onSelectSet }: ProfitTableProps) {
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const pageSize = 20;
+
+  // Ensure sets is always an array
+  const safeSets = Array.isArray(sets) ? sets : [];
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
@@ -84,7 +87,7 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
     }
   };
 
-  const sortedSets = [...sets].sort((a, b) => {
+  const sortedSets = [...safeSets].sort((a, b) => {
     let aVal: number | string, bVal: number | string;
 
     switch (sortField) {
@@ -130,7 +133,7 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
   });
 
   const paginatedSets = sortedSets.slice(page * pageSize, (page + 1) * pageSize);
-  const totalPages = Math.ceil(sets.length / pageSize);
+  const totalPages = Math.ceil(safeSets.length / pageSize);
 
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortField !== field) return null;
@@ -326,8 +329,8 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-4 py-3 border-t border-dark-border">
           <p className="text-sm text-gray-500">
-            Showing {page * pageSize + 1} to {Math.min((page + 1) * pageSize, sets.length)} of{' '}
-            {sets.length} sets
+            Showing {page * pageSize + 1} to {Math.min((page + 1) * pageSize, safeSets.length)} of{' '}
+            {safeSets.length} sets
           </p>
           <div className="flex space-x-2">
             <button
