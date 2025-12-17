@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import {
   ChevronDown,
   ChevronUp,
@@ -68,6 +68,49 @@ function RiskBadge({ level }: { level: string }) {
   );
 }
 
+function SortIcon({
+  field,
+  currentSort,
+  sortDir,
+}: {
+  field: SortField;
+  currentSort: SortField;
+  sortDir: 'asc' | 'desc';
+}) {
+  if (currentSort !== field) return null;
+  return sortDir === 'asc' ? (
+    <ChevronUp className="w-4 h-4" />
+  ) : (
+    <ChevronDown className="w-4 h-4" />
+  );
+}
+
+function HeaderCell({
+  field,
+  currentSort,
+  sortDir,
+  onSort,
+  children,
+}: {
+  field: SortField;
+  currentSort: SortField;
+  sortDir: 'asc' | 'desc';
+  onSort: (field: SortField) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <th
+      className="table-header px-4 py-3 cursor-pointer hover:text-mint transition-colors"
+      onClick={() => onSort(field)}
+    >
+      <div className="flex items-center space-x-1">
+        <span>{children}</span>
+        <SortIcon field={field} currentSort={currentSort} sortDir={sortDir} />
+      </div>
+    </th>
+  );
+}
+
 export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProps) {
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -84,80 +127,56 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
     }
   };
 
-  const sortedSets = [...sets].sort((a, b) => {
-    let aVal: number | string, bVal: number | string;
+  const sortedSets = useMemo(() => {
+    return [...sets].sort((a, b) => {
+      let aVal: number | string, bVal: number | string;
 
-    switch (sortField) {
-      case 'name':
-        aVal = a.set_name;
-        bVal = b.set_name;
-        break;
-      case 'profit':
-        aVal = a.profit_margin;
-        bVal = b.profit_margin;
-        break;
-      case 'volume':
-        aVal = a.volume;
-        bVal = b.volume;
-        break;
-      case 'roi':
-        aVal = a.profit_percentage;
-        bVal = b.profit_percentage;
-        break;
-      case 'trend':
-        aVal = a.trend_multiplier;
-        bVal = b.trend_multiplier;
-        break;
-      case 'risk':
-        // Sort by risk level (Low < Medium < High)
-        const riskOrder: Record<string, number> = { Low: 0, Medium: 1, High: 2 };
-        aVal = riskOrder[a.risk_level] ?? 1;
-        bVal = riskOrder[b.risk_level] ?? 1;
-        break;
-      case 'score':
-      default:
-        aVal = a.composite_score;
-        bVal = b.composite_score;
-    }
+      switch (sortField) {
+        case 'name':
+          aVal = a.set_name;
+          bVal = b.set_name;
+          break;
+        case 'profit':
+          aVal = a.profit_margin;
+          bVal = b.profit_margin;
+          break;
+        case 'volume':
+          aVal = a.volume;
+          bVal = b.volume;
+          break;
+        case 'roi':
+          aVal = a.profit_percentage;
+          bVal = b.profit_percentage;
+          break;
+        case 'trend':
+          aVal = a.trend_multiplier;
+          bVal = b.trend_multiplier;
+          break;
+        case 'risk': {
+          // Sort by risk level (Low < Medium < High)
+          const riskOrder: Record<string, number> = { Low: 0, Medium: 1, High: 2 };
+          aVal = riskOrder[a.risk_level] ?? 1;
+          bVal = riskOrder[b.risk_level] ?? 1;
+          break;
+        }
+        case 'score':
+        default:
+          aVal = a.composite_score;
+          bVal = b.composite_score;
+      }
 
-    if (typeof aVal === 'string') {
-      return sortDir === 'asc'
-        ? aVal.localeCompare(bVal as string)
-        : (bVal as string).localeCompare(aVal);
-    }
+      if (typeof aVal === 'string') {
+        return sortDir === 'asc'
+          ? aVal.localeCompare(bVal as string)
+          : (bVal as string).localeCompare(aVal);
+      }
 
-    return sortDir === 'asc' ? aVal - (bVal as number) : (bVal as number) - aVal;
-  });
+      return sortDir === 'asc' ? aVal - (bVal as number) : (bVal as number) - aVal;
+    });
+  }, [sets, sortField, sortDir]);
 
   const paginatedSets = sortedSets.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(sets.length / pageSize);
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return null;
-    return sortDir === 'asc' ? (
-      <ChevronUp className="w-4 h-4" />
-    ) : (
-      <ChevronDown className="w-4 h-4" />
-    );
-  };
-
-  const HeaderCell = ({
-    field,
-    children,
-  }: {
-    field: SortField;
-    children: React.ReactNode;
-  }) => (
-    <th
-      className="table-header px-4 py-3 cursor-pointer hover:text-mint transition-colors"
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center space-x-1">
-        <span>{children}</span>
-        <SortIcon field={field} />
-      </div>
-    </th>
-  );
 
   return (
     <div className="card p-0 overflow-hidden">
@@ -166,13 +185,62 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
           <thead className="bg-dark-hover border-b border-dark-border">
             <tr>
               <th className="table-header px-4 py-3 w-12">#</th>
-              <HeaderCell field="name">Set Name</HeaderCell>
-              <HeaderCell field="profit">Profit</HeaderCell>
-              <HeaderCell field="volume">Volume</HeaderCell>
-              <HeaderCell field="trend">Trend</HeaderCell>
-              <HeaderCell field="risk">Risk</HeaderCell>
-              <HeaderCell field="score">Score</HeaderCell>
-              <HeaderCell field="roi">ROI</HeaderCell>
+              <HeaderCell
+                field="name"
+                currentSort={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Set Name
+              </HeaderCell>
+              <HeaderCell
+                field="profit"
+                currentSort={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Profit
+              </HeaderCell>
+              <HeaderCell
+                field="volume"
+                currentSort={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Volume
+              </HeaderCell>
+              <HeaderCell
+                field="trend"
+                currentSort={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Trend
+              </HeaderCell>
+              <HeaderCell
+                field="risk"
+                currentSort={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Risk
+              </HeaderCell>
+              <HeaderCell
+                field="score"
+                currentSort={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Score
+              </HeaderCell>
+              <HeaderCell
+                field="roi"
+                currentSort={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                ROI
+              </HeaderCell>
               <th className="w-10"></th>
             </tr>
           </thead>
