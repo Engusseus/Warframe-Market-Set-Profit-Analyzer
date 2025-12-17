@@ -28,6 +28,9 @@ export function Analysis() {
   const [showFilters, setShowFilters] = useState(true);
   const [isRescoring, setIsRescoring] = useState(false);
 
+  // Validate currentAnalysis data integrity
+  const isValidAnalysis = currentAnalysis && Array.isArray(currentAnalysis.sets);
+
   const handleStrategyChange = async (newStrategy: StrategyType) => {
     if (!currentAnalysis) {
       return;
@@ -81,7 +84,7 @@ export function Analysis() {
         )}
 
         {/* Main Content */}
-        {currentAnalysis ? (
+        {isValidAnalysis ? (
           <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
             {/* Sidebar */}
             {showFilters && (
@@ -135,7 +138,9 @@ export function Analysis() {
             <BarChart3 className="w-16 h-16 text-gray-600 mx-auto mb-4" />
             <h3 className="text-xl font-semibold text-gray-200 mb-2">No Analysis Data</h3>
             <p className="text-gray-400">
-              Run an analysis from the Dashboard first to view and optimize results here.
+              {currentAnalysis && !Array.isArray(currentAnalysis.sets)
+                ? 'Analysis data is corrupted. Please run a new analysis.'
+                : 'Run an analysis from the Dashboard first to view and optimize results here.'}
             </p>
           </Card>
         )}
