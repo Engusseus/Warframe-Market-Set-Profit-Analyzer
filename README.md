@@ -12,7 +12,6 @@ A modern full-stack web application for analyzing Prime set profitability in War
 ## Table of Contents
 
 - [Features](#features)
-- [Screenshots](#screenshots)
 - [Quick Start](#quick-start)
 - [Docker Deployment](#docker-deployment)
 - [Project Structure](#project-structure)
@@ -40,20 +39,16 @@ A modern full-stack web application for analyzing Prime set profitability in War
 - **Expandable Rows**: Detailed part breakdown for each set
 
 ### Advanced Scoring System
-- **Geometric Scoring Model**: Multiplicative algorithm combining profit and volume metrics
-- **Strategy Profiles**: Balanced, Profit Focus, High Volume, Quick Flip, Safe Investment
-- **Real-Time Rescoring**: Apply new weights without re-fetching data
-- **Interactive Configuration**: Easy weight adjustment through UI
+- **Geometric Scoring Model**: `Score = (Profit * log10(Volume)) * ROI * TrendMultiplier / VolatilityPenalty`
+- **Strategy Profiles**: Safe & Steady, Balanced, Aggressive - each adjusts how factors contribute to score
+- **Trend & Volatility Analysis**: Evaluates price stability and market direction
+- **Real-Time Rescoring**: Switch strategies without re-fetching data
 
 ### Full REST API
 - **FastAPI Backend**: Modern async Python API
 - **OpenAPI Documentation**: Auto-generated at `/docs`
 - **Background Tasks**: Long-running analysis runs asynchronously
 - **Export Capabilities**: JSON export of all analysis data
-
-## Screenshots
-
-> *Screenshots can be added by placing images in a `/screenshots` directory and updating this section*
 
 ## Quick Start
 
@@ -207,19 +202,19 @@ Interactive API documentation is available at:
 | `CACHE_DIR` | `cache` | Cache directory path |
 | `RATE_LIMIT_REQUESTS` | `3` | Max requests per window |
 | `RATE_LIMIT_WINDOW` | `1.0` | Rate limit window (seconds) |
-| `DEFAULT_PROFIT_WEIGHT` | `1.0` | Default profit weight |
-| `DEFAULT_VOLUME_WEIGHT` | `1.2` | Default volume weight |
+| `REQUEST_TIMEOUT` | `10` | HTTP request timeout (seconds) |
+| `ANALYSIS_TIMEOUT` | `600` | Max analysis duration (seconds) |
 | `CORS_ORIGINS` | `http://localhost:5173,...` | Allowed CORS origins |
 
 ### Strategy Profiles
 
+The scoring engine uses strategy profiles that adjust how each factor contributes to the final score:
+
 | Strategy | Description | Best For |
 |----------|-------------|----------|
-| **Balanced** | Equal weight to profit and volume | General use |
-| **Profit Focus** | Maximizes profit margins | High-value traders |
-| **High Volume** | Prioritizes liquid markets | Quick turnover |
-| **Quick Flip** | Fast-moving items | Active traders |
-| **Safe Investment** | Stable, consistent items | Risk-averse traders |
+| **Safe & Steady** | Strong volatility penalty, lower trend emphasis. Requires higher liquidity (50+ volume) | Risk-averse traders seeking stable profits |
+| **Balanced** | Equal consideration of all factors. Moderate volume threshold (10+) | General trading, most users |
+| **Aggressive** | Tolerates volatility, emphasizes ROI and positive trends. Lower volume acceptable (5+) | Experienced traders seeking high gains |
 
 ## Tech Stack
 
