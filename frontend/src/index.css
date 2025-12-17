@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+/* Custom theme configuration for Tailwind v4 */
+@theme {
+  /* Primary dark background colors */
+  --color-dark-bg: #080206;
+  --color-dark-card: #0d0810;
+  --color-dark-hover: #1a1520;
+  --color-dark-border: #2a2530;
+
+  /* Accent colors from spec */
+  --color-mint: #9FBCAD;
+  --color-wf-blue: #7A9DB1;
+  --color-wf-purple: #9681AC;
+
+  /* Status colors */
+  --color-profit-positive: #4ade80;
+  --color-profit-negative: #f87171;
+
+  /* Custom animations */
+  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-glow: glow 2s ease-in-out infinite alternate;
+  --animate-fade-in: fadeIn 0.3s ease-in-out;
+  --animate-slide-up: slideUp 0.3s ease-out;
+}
+
+@keyframes glow {
+  0% { box-shadow: 0 0 5px #9FBCAD, 0 0 10px #9FBCAD; }
+  100% { box-shadow: 0 0 10px #9FBCAD, 0 0 20px #9FBCAD; }
+}
+
+@keyframes fadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes slideUp {
+  0% { transform: translateY(10px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes progress-stripes {
+  0% { background-position: 0 0; }
+  100% { background-position: 40px 0; }
+}
+
+@keyframes progress-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(159, 188, 173, 0.3); }
+  50% { box-shadow: 0 0 15px rgba(159, 188, 173, 0.6); }
+}
+
+/* Base styles */
+:root {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background-color: var(--color-dark-bg);
+  color: #f0f0f0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-dark-card);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-dark-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-wf-purple);
+}
+
+/* Custom utility classes */
+@utility card {
+  background-color: var(--color-dark-card);
+  border: 1px solid var(--color-dark-border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  transition: all 0.2s;
+}
+
+@utility card-hover {
+  &:hover {
+    border-color: color-mix(in srgb, var(--color-mint) 50%, transparent);
+    box-shadow: 0 10px 15px -3px color-mix(in srgb, var(--color-mint) 10%, transparent);
+  }
+}
+
+@utility btn-primary {
+  padding: 0.5rem 1rem;
+  background-color: var(--color-mint);
+  color: var(--color-dark-bg);
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background-color: color-mix(in srgb, var(--color-mint) 90%, transparent);
+  }
+
+  &:active {
+    background-color: color-mix(in srgb, var(--color-mint) 80%, transparent);
+  }
+
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mint) 50%, transparent);
+  }
+}
+
+@utility btn-secondary {
+  padding: 0.5rem 1rem;
+  background-color: var(--color-dark-hover);
+  border: 1px solid var(--color-dark-border);
+  color: #f3f4f6;
+  font-weight: 500;
+  border-radius: 0.5rem;
+  transition: all 0.2s;
+
+  &:hover {
+    background-color: var(--color-dark-border);
+    border-color: color-mix(in srgb, var(--color-mint) 30%, transparent);
+  }
+
+  &:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mint) 30%, transparent);
+  }
+}
+
+@utility input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background-color: var(--color-dark-card);
+  border: 1px solid var(--color-dark-border);
+  border-radius: 0.5rem;
+  color: #f3f4f6;
+  transition: all 0.2s;
+
+  &::placeholder {
+    color: #6b7280;
+  }
+
+  &:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--color-mint) 50%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-mint) 30%, transparent);
+  }
+}
+
+@utility profit-positive {
+  color: var(--color-profit-positive);
+}
+
+@utility profit-negative {
+  color: var(--color-profit-negative);
+}
+
+@utility gradient-text {
+  background: linear-gradient(to right, var(--color-mint), var(--color-wf-blue), var(--color-wf-purple));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
