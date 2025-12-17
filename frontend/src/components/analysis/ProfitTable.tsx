@@ -20,6 +20,42 @@ interface ProfitTableProps {
 
 type SortField = 'rank' | 'name' | 'profit' | 'volume' | 'score' | 'roi' | 'trend' | 'risk';
 
+interface HeaderCellProps {
+  field: SortField;
+  currentSortField: SortField;
+  sortDir: 'asc' | 'desc';
+  onSort: (field: SortField) => void;
+  children: React.ReactNode;
+}
+
+function HeaderCell({
+  field,
+  currentSortField,
+  sortDir,
+  onSort,
+  children,
+}: HeaderCellProps) {
+  const isSorted = currentSortField === field;
+
+  return (
+    <th
+      className="table-header px-4 py-3"
+      aria-sort={isSorted ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="flex items-center space-x-1 hover:text-mint transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-mint rounded"
+      >
+        <span>{children}</span>
+        {isSorted && (
+          sortDir === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />
+        )}
+      </button>
+    </th>
+  );
+}
+
 function TrendIndicator({ set }: { set: ScoredSet }) {
   const direction = set.trend_direction;
   const multiplier = set.trend_multiplier;
@@ -68,7 +104,7 @@ function RiskBadge({ level }: { level: string }) {
   );
 }
 
-export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProps) {
+export function ProfitTable({ sets }: ProfitTableProps) {
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -108,12 +144,13 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
         aVal = a.trend_multiplier;
         bVal = b.trend_multiplier;
         break;
-      case 'risk':
+      case 'risk': {
         // Sort by risk level (Low < Medium < High)
         const riskOrder: Record<string, number> = { Low: 0, Medium: 1, High: 2 };
         aVal = riskOrder[a.risk_level] ?? 1;
         bVal = riskOrder[b.risk_level] ?? 1;
         break;
+      }
       case 'score':
       default:
         aVal = a.composite_score;
@@ -132,33 +169,6 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
   const paginatedSets = sortedSets.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(sets.length / pageSize);
 
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return null;
-    return sortDir === 'asc' ? (
-      <ChevronUp className="w-4 h-4" />
-    ) : (
-      <ChevronDown className="w-4 h-4" />
-    );
-  };
-
-  const HeaderCell = ({
-    field,
-    children,
-  }: {
-    field: SortField;
-    children: React.ReactNode;
-  }) => (
-    <th
-      className="table-header px-4 py-3 cursor-pointer hover:text-mint transition-colors"
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center space-x-1">
-        <span>{children}</span>
-        <SortIcon field={field} />
-      </div>
-    </th>
-  );
-
   return (
     <div className="card p-0 overflow-hidden">
       <div className="overflow-x-auto">
@@ -166,13 +176,62 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
           <thead className="bg-dark-hover border-b border-dark-border">
             <tr>
               <th className="table-header px-4 py-3 w-12">#</th>
-              <HeaderCell field="name">Set Name</HeaderCell>
-              <HeaderCell field="profit">Profit</HeaderCell>
-              <HeaderCell field="volume">Volume</HeaderCell>
-              <HeaderCell field="trend">Trend</HeaderCell>
-              <HeaderCell field="risk">Risk</HeaderCell>
-              <HeaderCell field="score">Score</HeaderCell>
-              <HeaderCell field="roi">ROI</HeaderCell>
+              <HeaderCell
+                field="name"
+                currentSortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Set Name
+              </HeaderCell>
+              <HeaderCell
+                field="profit"
+                currentSortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Profit
+              </HeaderCell>
+              <HeaderCell
+                field="volume"
+                currentSortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Volume
+              </HeaderCell>
+              <HeaderCell
+                field="trend"
+                currentSortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Trend
+              </HeaderCell>
+              <HeaderCell
+                field="risk"
+                currentSortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Risk
+              </HeaderCell>
+              <HeaderCell
+                field="score"
+                currentSortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                Score
+              </HeaderCell>
+              <HeaderCell
+                field="roi"
+                currentSortField={sortField}
+                sortDir={sortDir}
+                onSort={handleSort}
+              >
+                ROI
+              </HeaderCell>
               <th className="w-10"></th>
             </tr>
           </thead>
