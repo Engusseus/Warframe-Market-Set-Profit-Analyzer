@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from .middleware import SecurityHeadersMiddleware
 from .api.router import api_router
 from .config import get_settings
 from .core.logging import setup_logging, get_logger
@@ -45,6 +46,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Add security headers
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # Include API router
     app.include_router(api_router, prefix=settings.api_prefix)
