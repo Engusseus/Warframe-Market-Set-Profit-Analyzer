@@ -1,10 +1,22 @@
 # Virtual environment
 venv/
+backend/venv/
 
 # Claude Code configuration
 .claude/
 CLAUDE.md
 INITIAL.md
+
+# BMAD framework
+.bmad/
+docs/
+
+# Node.js / Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.log
+npm-debug.log*
 
 # Python cache files
 __pycache__/
@@ -65,6 +77,9 @@ cache/*.json
 cache/*.cache
 cache/*.sqlite
 cache/*_export.json
+backend/cache/*.json
+backend/cache/*.sqlite
+backend/cache/*.cache
 
 # Database files (personal analysis data)
 *.sqlite
