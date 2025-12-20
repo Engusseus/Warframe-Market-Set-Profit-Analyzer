@@ -1,0 +1,11 @@
+# Additional test dependencies (install with: pip install -r requirements-test.txt)
+# Note: pytest, pytest-asyncio, pytest-cov are already in requirements.txt
+
+# Mock httpx requests to external APIs
+respx>=0.21.0
+
+# Prevent hanging tests
+pytest-timeout>=2.3.0
+
+# Time mocking for rate limiter tests
+freezegun>=1.4.0
