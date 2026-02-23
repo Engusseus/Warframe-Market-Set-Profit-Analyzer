@@ -13,6 +13,7 @@ from ...models.schemas import (
     AnalysisResponse,
     AnalysisStartedResponse,
     AnalysisStatusResponse,
+    ExecutionMode,
     ScoredData,
     StrategyProfileResponse,
     StrategyType as SchemaStrategyType,
@@ -34,12 +35,21 @@ def get_analysis_service() -> AnalysisService:
     return _analysis_service
 
 
+def _parse_execution_mode(execution_mode: str) -> ExecutionMode:
+    """Parse execution mode with backward-compatible default."""
+    try:
+        return ExecutionMode(str(execution_mode).strip().lower())
+    except ValueError:
+        return ExecutionMode.INSTANT
+
+
 @router.get("", response_model=AnalysisResponse)
 async def get_analysis(
     request: Request,
     force_refresh: bool = Query(False, description="Force fresh data fetch"),
     test_mode: bool = Query(False, description="Run in test mode (limited data)"),
     strategy: str = Query("balanced", description="Trading strategy (safe_steady, balanced, aggressive)"),
+    execution_mode: str = Query("instant", description="Execution mode (instant, patient)"),
     # Legacy parameters for backward compatibility
     profit_weight: float = Query(1.0, ge=0.0, le=10.0, description="Deprecated: Profit weight"),
     volume_weight: float = Query(1.2, ge=0.0, le=10.0, description="Deprecated: Volume weight")
@@ -56,7 +66,13 @@ async def get_analysis(
     """
     logger = get_logger()
     logger.info(f"Analysis request received from {request.client.host if request.client else 'unknown'}")
-    logger.info(f"Request params: force_refresh={force_refresh}, test_mode={test_mode}, strategy={strategy}")
+    logger.info(
+        "Request params: force_refresh=%s, test_mode=%s, strategy=%s, execution_mode=%s",
+        force_refresh,
+        test_mode,
+        strategy,
+        execution_mode,
+    )
 
     # Parse strategy
     try:
@@ -65,12 +81,17 @@ async def get_analysis(
         strategy_type = StrategyType.BALANCED
         logger.warning(f"Invalid strategy '{strategy}', defaulting to balanced")
 
+    execution_mode_type = _parse_execution_mode(execution_mode)
+    if execution_mode_type.value != str(execution_mode).strip().lower():
+        logger.warning(f"Invalid execution_mode '{execution_mode}', defaulting to instant")
+
     service = get_analysis_service()
 
     try:
         # Run full analysis with strategy
         result = await service.run_full_analysis(
             strategy=strategy_type,
+            execution_mode=execution_mode_type,
             force_refresh=force_refresh,
             test_mode=test_mode
         )
@@ -109,11 +130,18 @@ async def trigger_analysis(
     except (ValueError, AttributeError):
         strategy_type = StrategyType.BALANCED
 
+    try:
+        raw_execution_mode = getattr(config.execution_mode, "value", config.execution_mode)
+        execution_mode_type = ExecutionMode(str(raw_execution_mode).strip().lower())
+    except (ValueError, TypeError):
+        execution_mode_type = ExecutionMode.INSTANT
+
     # Start background analysis
     async def run_analysis():
         try:
             await service.run_full_analysis(
                 strategy=strategy_type,
+                execution_mode=execution_mode_type,
                 force_refresh=config.force_refresh
             )
         except Exception:
@@ -200,6 +228,7 @@ async def stream_analysis_progress(request: Request):
 @router.post("/rescore")
 async def rescore_analysis(
     strategy: str = Query("balanced", description="Trading strategy (safe_steady, balanced, aggressive)"),
+    execution_mode: str = Query("instant", description="Execution mode (instant, patient)"),
     # Legacy parameters for backward compatibility
     profit_weight: float = Query(1.0, ge=0.0, le=10.0, description="Deprecated"),
     volume_weight: float = Query(1.2, ge=0.0, le=10.0, description="Deprecated")
@@ -219,9 +248,14 @@ async def rescore_analysis(
     except ValueError:
         strategy_type = StrategyType.BALANCED
 
+    execution_mode_type = _parse_execution_mode(execution_mode)
+
     service = get_analysis_service()
 
-    result = await service.recalculate_scores(strategy=strategy_type)
+    result = await service.recalculate_scores(
+        strategy=strategy_type,
+        execution_mode=execution_mode_type
+    )
 
     if result is None:
         raise HTTPException(
@@ -238,6 +272,7 @@ async def rescore_analysis(
         "total_sets": len(scored_models),
         "profitable_sets": profitable_count,
         "strategy": strategy_type.value,
+        "execution_mode": execution_mode_type.value,
         "weights": WeightsConfig(
             strategy=SchemaStrategyType(strategy_type.value),
             profit_weight=1.0,

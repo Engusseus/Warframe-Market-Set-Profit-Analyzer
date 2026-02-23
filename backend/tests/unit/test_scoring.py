@@ -1,5 +1,4 @@
 """Unit tests for scoring algorithms."""
-import math
 import pytest
 
 from app.core.scoring import (
@@ -9,6 +8,7 @@ from app.core.scoring import (
     recalculate_scores_with_strategy,
 )
 from app.core.strategy_profiles import StrategyType
+from app.models.schemas import ExecutionMode
 
 
 class TestCalculateCompositeScore:
@@ -67,6 +67,49 @@ class TestCalculateCompositeScore:
             volatility_penalty=1.0,
         )
         assert score < 0
+
+    @pytest.mark.unit
+    def test_negative_base_with_negative_roi_becomes_more_negative(self):
+        """Test sign-preserving ROI scaling for negative base scores."""
+        score_without_roi = calculate_composite_score(
+            profit=-20.0,
+            volume=100,
+            roi=0.0,
+            trend_multiplier=1.0,
+            volatility_penalty=1.0,
+        )
+        score_with_negative_roi = calculate_composite_score(
+            profit=-20.0,
+            volume=100,
+            roi=-50.0,
+            trend_multiplier=1.0,
+            volatility_penalty=1.0,
+        )
+
+        assert score_with_negative_roi < score_without_roi
+        assert abs(score_with_negative_roi) > abs(score_without_roi)
+        assert score_with_negative_roi == pytest.approx(-60.0)
+
+    @pytest.mark.unit
+    def test_negative_base_with_positive_roi_is_dampened(self):
+        """Test that opposing ROI direction reduces negative magnitude."""
+        score_without_roi = calculate_composite_score(
+            profit=-20.0,
+            volume=100,
+            roi=0.0,
+            trend_multiplier=1.0,
+            volatility_penalty=1.0,
+        )
+        score_with_positive_roi = calculate_composite_score(
+            profit=-20.0,
+            volume=100,
+            roi=50.0,
+            trend_multiplier=1.0,
+            volatility_penalty=1.0,
+        )
+
+        assert abs(score_with_positive_roi) < abs(score_without_roi)
+        assert score_with_positive_roi == pytest.approx(-20.0)
 
     @pytest.mark.unit
     def test_high_volatility_penalty_reduces_score(self):
@@ -137,6 +180,27 @@ class TestCalculateCompositeScore:
         assert score_high_vol > score_low_vol
         # Volume 1000 has log10=3, volume 10 has log10=1, so ratio should be 3
         assert score_high_vol / score_low_vol == pytest.approx(3.0)
+
+    @pytest.mark.unit
+    def test_liquidity_multiplier_affects_score(self):
+        """Test that liquidity multiplier scales the final composite score."""
+        baseline = calculate_composite_score(
+            profit=40.0,
+            volume=100,
+            roi=25.0,
+            trend_multiplier=1.0,
+            volatility_penalty=1.0,
+            liquidity_multiplier=1.0,
+        )
+        boosted = calculate_composite_score(
+            profit=40.0,
+            volume=100,
+            roi=25.0,
+            trend_multiplier=1.0,
+            volatility_penalty=1.0,
+            liquidity_multiplier=1.2,
+        )
+        assert boosted == pytest.approx(baseline * 1.2)
 
 
 class TestCalculateProfitabilityScoresWithMetrics:
@@ -228,6 +292,8 @@ class TestCalculateProfitabilityScoresWithMetrics:
         assert hasattr(item, 'trend_multiplier')
         assert hasattr(item, 'volatility_penalty')
         assert hasattr(item, 'profit_contribution')
+        assert hasattr(item, 'execution_mode')
+        assert hasattr(item, 'liquidity_multiplier')
 
     @pytest.mark.unit
     def test_uses_default_metrics_for_missing_items(self, sample_profit_data, sample_volume_data):
@@ -254,6 +320,79 @@ class TestCalculateProfitabilityScoresWithMetrics:
         # Should assign volume=1 to all items
         for item in results:
             assert item.volume == 1
+
+    @pytest.mark.unit
+    def test_execution_mode_switches_profit_fields(
+        self, sample_profit_data, sample_volume_data, sample_trend_metrics
+    ):
+        """Patient mode should score using patient profit metrics."""
+        instant_results = calculate_profitability_scores_with_metrics(
+            profit_data=sample_profit_data,
+            volume_data=sample_volume_data,
+            trend_volatility_metrics=sample_trend_metrics,
+            strategy=StrategyType.BALANCED,
+            execution_mode=ExecutionMode.INSTANT,
+        )
+        patient_results = calculate_profitability_scores_with_metrics(
+            profit_data=sample_profit_data,
+            volume_data=sample_volume_data,
+            trend_volatility_metrics=sample_trend_metrics,
+            strategy=StrategyType.BALANCED,
+            execution_mode=ExecutionMode.PATIENT,
+        )
+
+        instant_by_slug = {item.set_slug: item for item in instant_results}
+        patient_by_slug = {item.set_slug: item for item in patient_results}
+
+        assert instant_by_slug["saryn_prime_set"].profit_margin == pytest.approx(30.0)
+        assert patient_by_slug["saryn_prime_set"].profit_margin == pytest.approx(70.0)
+        assert instant_by_slug["saryn_prime_set"].execution_mode == ExecutionMode.INSTANT
+        assert patient_by_slug["saryn_prime_set"].execution_mode == ExecutionMode.PATIENT
+
+    @pytest.mark.unit
+    def test_liquidity_metrics_populated_from_orderbook(
+        self, sample_profit_data, sample_volume_data, sample_trend_metrics
+    ):
+        """Liquidity fields should be computed when orderbook depth is available."""
+        results = calculate_profitability_scores_with_metrics(
+            profit_data=sample_profit_data,
+            volume_data=sample_volume_data,
+            trend_volatility_metrics=sample_trend_metrics,
+            strategy=StrategyType.BALANCED,
+            execution_mode=ExecutionMode.INSTANT,
+        )
+
+        saryn = next(item for item in results if item.set_slug == "saryn_prime_set")
+        assert saryn.bid_ask_ratio > 0
+        assert saryn.sell_side_competition > 0
+        assert saryn.liquidity_velocity > 0
+        assert saryn.liquidity_multiplier > 1.0
+
+    @pytest.mark.unit
+    def test_liquidity_defaults_when_orderbook_missing(self, sample_volume_data, sample_trend_metrics):
+        """Rows without orderbook depth should keep neutral liquidity defaults."""
+        profit_data = [{
+            "set_slug": "legacy_set",
+            "set_name": "Legacy Set",
+            "set_price": 100.0,
+            "part_cost": 80.0,
+            "profit_margin": 20.0,
+            "profit_percentage": 25.0,
+            "part_details": [],
+        }]
+        volume_data = {"individual": {"legacy_set": 100}, "total": 100}
+        results = calculate_profitability_scores_with_metrics(
+            profit_data=profit_data,
+            volume_data=volume_data,
+            trend_volatility_metrics={},
+            strategy=StrategyType.BALANCED,
+        )
+        assert len(results) == 1
+        item = results[0]
+        assert item.bid_ask_ratio == 0.0
+        assert item.sell_side_competition == 0.0
+        assert item.liquidity_velocity == 0.0
+        assert item.liquidity_multiplier == 1.0
 
 
 class TestCalculateProfitabilityScoresLegacy:
@@ -344,3 +483,16 @@ class TestRecalculateScoresWithStrategy:
         for original, rescored_item in zip(sample_scored_data, rescored):
             assert rescored_item['set_slug'] == original['set_slug']
             assert rescored_item['profit_margin'] == original['profit_margin']
+
+    @pytest.mark.unit
+    def test_rescoring_can_switch_execution_mode(self, sample_scored_data):
+        """Rescore should update profit fields when execution mode changes."""
+        rescored = recalculate_scores_with_strategy(
+            scored_data=sample_scored_data,
+            strategy=StrategyType.BALANCED,
+            execution_mode=ExecutionMode.PATIENT,
+        )
+        by_slug = {item['set_slug']: item for item in rescored}
+        assert by_slug["saryn_prime_set"]["execution_mode"] == "patient"
+        assert by_slug["saryn_prime_set"]["profit_margin"] == pytest.approx(70.0)
+        assert by_slug["mesa_prime_set"]["profit_margin"] == pytest.approx(50.0)

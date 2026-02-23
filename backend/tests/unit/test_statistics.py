@@ -1,4 +1,5 @@
 """Unit tests for statistics calculations."""
+import math
 import pytest
 import statistics as stats_module
 
@@ -109,10 +110,16 @@ class TestCalculateVolatility:
 
     @pytest.mark.unit
     def test_returns_standard_deviation(self):
-        """Test that volatility is standard deviation."""
+        """Test that volatility is log-return standard deviation."""
         prices = [100.0, 110.0, 90.0, 105.0, 95.0]
         volatility = calculate_volatility(prices)
-        expected = stats_module.stdev(prices)
+        log_returns = [
+            math.log(110.0 / 100.0),
+            math.log(90.0 / 110.0),
+            math.log(105.0 / 90.0),
+            math.log(95.0 / 105.0),
+        ]
+        expected = stats_module.stdev(log_returns)
         assert volatility == pytest.approx(expected)
 
     @pytest.mark.unit
@@ -130,6 +137,14 @@ class TestCalculateVolatility:
         """Test that identical prices return zero volatility."""
         assert calculate_volatility([100.0, 100.0, 100.0]) == 0.0
 
+    @pytest.mark.unit
+    def test_non_positive_prices_are_ignored(self):
+        """Test that non-positive prices are skipped for log returns."""
+        prices = [100.0, 0.0, 110.0, -5.0, 121.0]
+        # Valid log-return pairs are broken by non-positive values, leaving
+        # fewer than 2 valid returns.
+        assert calculate_volatility(prices) == 0.0
+
 
 class TestCalculateVolatilityPenalty:
     """Tests for volatility penalty calculation."""
@@ -141,16 +156,16 @@ class TestCalculateVolatilityPenalty:
         assert penalty == 1.0
 
     @pytest.mark.unit
-    def test_zero_mean_returns_one(self):
-        """Test that zero mean returns penalty of 1.0."""
-        penalty = calculate_volatility_penalty(10.0, 0.0)
-        assert penalty == 1.0
+    def test_mean_price_kept_for_compatibility(self):
+        """Test that mean_price parameter does not break penalty calc."""
+        penalty = calculate_volatility_penalty(0.1, 0.0)
+        assert penalty > 1.0
 
     @pytest.mark.unit
     def test_higher_volatility_higher_penalty(self):
         """Test that higher volatility gives higher penalty."""
-        penalty_low = calculate_volatility_penalty(5.0, 100.0)
-        penalty_high = calculate_volatility_penalty(30.0, 100.0)
+        penalty_low = calculate_volatility_penalty(0.03, 100.0)
+        penalty_high = calculate_volatility_penalty(0.15, 100.0)
         assert penalty_high > penalty_low
 
     @pytest.mark.unit
@@ -272,6 +287,46 @@ class TestCalculateMetricsFromHistory:
         assert metrics['data_points'] == 2
         assert metrics['trend_direction'] == "rising"
 
+    @pytest.mark.unit
+    def test_macd_multiplier_captures_recent_reversal(self):
+        """Test that trend multiplier can diverge from regression slope."""
+        day = 86400
+        history = [
+            {"lowest_price": 100.0, "timestamp": day * 0},
+            {"lowest_price": 110.0, "timestamp": day * 1},
+            {"lowest_price": 120.0, "timestamp": day * 2},
+            {"lowest_price": 130.0, "timestamp": day * 3},
+            {"lowest_price": 125.0, "timestamp": day * 4},
+            {"lowest_price": 120.0, "timestamp": day * 5},
+            {"lowest_price": 115.0, "timestamp": day * 6},
+        ]
+
+        metrics = calculate_metrics_from_history(history)
+
+        # Regression is still positive overall, but MACD captures the recent drop.
+        assert metrics['trend_slope'] > 0
+        assert metrics['trend_direction'] == "falling"
+        assert metrics['trend_multiplier'] < 1.0
+
+    @pytest.mark.unit
+    def test_robust_range_reduces_outlier_distortion(self):
+        """Test robust trend normalization with a strong outlier present."""
+        day = 86400
+        history = [
+            {"lowest_price": 100.0, "timestamp": day * 0},
+            {"lowest_price": 1000.0, "timestamp": day * 1},
+            {"lowest_price": 100.0, "timestamp": day * 2},
+            {"lowest_price": 101.0, "timestamp": day * 3},
+            {"lowest_price": 102.0, "timestamp": day * 4},
+            {"lowest_price": 103.0, "timestamp": day * 5},
+            {"lowest_price": 104.0, "timestamp": day * 6},
+        ]
+
+        metrics = calculate_metrics_from_history(history)
+
+        assert metrics['trend_multiplier'] > 1.0
+        assert metrics['trend_direction'] == "rising"
+
 
 class TestCalculateScoreContributions:
     """Tests for score contribution calculation."""
@@ -327,3 +382,17 @@ class TestCalculateScoreContributions:
         _, _, roi_contrib, _, _ = result
         # ROI factor = 1.0 + (50/100) = 1.5
         assert roi_contrib == pytest.approx(1.5)
+
+    @pytest.mark.unit
+    def test_roi_contribution_preserves_negative_base_sign(self):
+        """Test ROI factor increases negative magnitude for negative ROI."""
+        result = calculate_score_contributions(
+            profit=-50.0,
+            volume=100,
+            roi=-20.0,
+            trend_multiplier=1.0,
+            volatility_penalty=1.0,
+        )
+        _, _, roi_contrib, _, _ = result
+        # For negative base score, negative ROI should increase magnitude.
+        assert roi_contrib == pytest.approx(1.2)

@@ -1,6 +1,100 @@
 """API tests for analysis endpoints."""
+import asyncio
+from datetime import datetime
+
 import pytest
 from httpx import AsyncClient
+
+from app.models.schemas import (
+    AnalysisResponse,
+    ExecutionMode,
+    ScoredData,
+    StrategyType,
+    WeightsConfig,
+)
+
+
+@pytest.fixture
+def fake_analysis_service(monkeypatch):
+    """Monkeypatched analysis service for route parameter verification."""
+    class FakeAnalysisService:
+        def __init__(self):
+            self.run_calls = []
+            self.rescore_calls = []
+
+        async def run_full_analysis(self, **kwargs):
+            self.run_calls.append(kwargs)
+            mode = kwargs.get("execution_mode", ExecutionMode.INSTANT)
+            if isinstance(mode, str):
+                mode = ExecutionMode(mode)
+
+            scored = ScoredData(
+                set_slug="test_set",
+                set_name="Test Set",
+                set_price=100.0,
+                part_cost=80.0,
+                profit_margin=20.0,
+                profit_percentage=25.0,
+                part_details=[],
+                execution_mode=mode,
+                volume=100,
+                normalized_profit=1.0,
+                normalized_volume=1.0,
+                profit_score=1.0,
+                volume_score=1.0,
+                total_score=1.0,
+                composite_score=1.0,
+            )
+            return AnalysisResponse(
+                run_id=1,
+                timestamp=datetime.now(),
+                sets=[scored],
+                total_sets=1,
+                profitable_sets=1,
+                weights=WeightsConfig(),
+                strategy=StrategyType.BALANCED,
+                execution_mode=mode,
+                cached=False,
+            )
+
+        def get_status(self):
+            return {
+                "status": "idle",
+                "progress": 0,
+                "message": "",
+                "run_id": None,
+                "error": None,
+            }
+
+        async def recalculate_scores(self, strategy, execution_mode=None, **kwargs):
+            self.rescore_calls.append({
+                "strategy": strategy,
+                "execution_mode": execution_mode,
+            })
+            mode = execution_mode or ExecutionMode.INSTANT
+
+            scored = ScoredData(
+                set_slug="test_set",
+                set_name="Test Set",
+                set_price=100.0,
+                part_cost=80.0,
+                profit_margin=20.0,
+                profit_percentage=25.0,
+                part_details=[],
+                execution_mode=mode,
+                volume=100,
+                normalized_profit=1.0,
+                normalized_volume=1.0,
+                profit_score=1.0,
+                volume_score=1.0,
+                total_score=1.0,
+                composite_score=1.0,
+            )
+            return [scored.model_dump()]
+
+    service = FakeAnalysisService()
+    monkeypatch.setattr("app.api.routes.analysis.get_analysis_service", lambda: service)
+    return service
 
 
 class TestGetStrategies:
@@ -97,6 +191,70 @@ class TestRescoreAnalysis:
 
         # Should not return 400 (bad request)
         assert response.status_code != 400
+
+    @pytest.mark.api
+    @pytest.mark.asyncio
+    async def test_accepts_execution_mode_parameter(
+        self,
+        async_client: AsyncClient,
+        fake_analysis_service,
+    ):
+        """Test that execution_mode is accepted for rescoring."""
+        response = await async_client.post(
+            "/api/analysis/rescore",
+            params={"strategy": "balanced", "execution_mode": "patient"}
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["execution_mode"] == "patient"
+        assert fake_analysis_service.rescore_calls
+        assert fake_analysis_service.rescore_calls[-1]["execution_mode"] == ExecutionMode.PATIENT
+
+
+class TestAnalysisExecutionMode:
+    """Tests for execution mode handling on analysis endpoints."""
+
+    @pytest.mark.api
+    @pytest.mark.asyncio
+    async def test_get_analysis_passes_execution_mode(
+        self,
+        async_client: AsyncClient,
+        fake_analysis_service,
+    ):
+        """GET /analysis should pass execution_mode to service."""
+        response = await async_client.get(
+            "/api/analysis",
+            params={"execution_mode": "patient", "strategy": "balanced", "test_mode": True},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["execution_mode"] == "patient"
+        assert fake_analysis_service.run_calls
+        assert fake_analysis_service.run_calls[-1]["execution_mode"] == ExecutionMode.PATIENT
+
+    @pytest.mark.api
+    @pytest.mark.asyncio
+    async def test_trigger_analysis_honors_config_execution_mode(
+        self,
+        async_client: AsyncClient,
+        fake_analysis_service,
+    ):
+        """POST /analysis should pass config.execution_mode into background run."""
+        response = await async_client.post(
+            "/api/analysis",
+            json={
+                "strategy": "balanced",
+                "execution_mode": "patient",
+                "force_refresh": False,
+            },
+        )
+
+        assert response.status_code == 200
+        await asyncio.sleep(0)
+        assert fake_analysis_service.run_calls
+        assert fake_analysis_service.run_calls[-1]["execution_mode"] == ExecutionMode.PATIENT
 
 
 class TestAnalysisProgress:

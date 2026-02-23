@@ -7,6 +7,99 @@ import math
 import statistics
 from typing import Dict, List, Tuple
 
+from .roi import calculate_sign_preserving_roi_factor
+
+
+def _calculate_percentile(sorted_values: List[float], percentile: float) -> float:
+    """Calculate percentile with linear interpolation.
+
+    Args:
+        sorted_values: Values sorted ascending.
+        percentile: Percentile in [0, 100].
+
+    Returns:
+        Interpolated percentile value or 0.0 if empty input.
+    """
+    if not sorted_values:
+        return 0.0
+
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+
+    bounded_percentile = max(0.0, min(100.0, percentile))
+    position = (len(sorted_values) - 1) * (bounded_percentile / 100.0)
+    lower_index = int(math.floor(position))
+    upper_index = int(math.ceil(position))
+
+    if lower_index == upper_index:
+        return sorted_values[lower_index]
+
+    weight = position - lower_index
+    return (
+        sorted_values[lower_index]
+        + (sorted_values[upper_index] - sorted_values[lower_index]) * weight
+    )
+
+
+def _calculate_robust_trend_range(prices: List[float]) -> float:
+    """Calculate a robust price range for trend normalization.
+
+    Uses IQR (Q3 - Q1) as the primary range estimate. If IQR is zero, falls
+    back to a bounded percentile range (P90 - P10), and finally to max-min.
+    """
+    if len(prices) < 2:
+        return 0.0
+
+    sorted_prices = sorted(prices)
+
+    q1 = _calculate_percentile(sorted_prices, 25.0)
+    q3 = _calculate_percentile(sorted_prices, 75.0)
+    iqr = q3 - q1
+    if iqr > 0:
+        return iqr
+
+    p10 = _calculate_percentile(sorted_prices, 10.0)
+    p90 = _calculate_percentile(sorted_prices, 90.0)
+    bounded_percentile_range = p90 - p10
+    if bounded_percentile_range > 0:
+        return bounded_percentile_range
+
+    return sorted_prices[-1] - sorted_prices[0]
+
+
+def _calculate_ema_series(values: List[float], period: int) -> List[float]:
+    """Calculate EMA series for the given values."""
+    if not values:
+        return []
+
+    alpha = 2.0 / (period + 1.0)
+    ema = values[0]
+    ema_series: List[float] = []
+
+    for value in values:
+        ema = (alpha * value) + ((1.0 - alpha) * ema)
+        ema_series.append(ema)
+
+    return ema_series
+
+
+def _calculate_macd_histogram(prices: List[float]) -> float:
+    """Calculate MACD histogram value from the price series."""
+    if len(prices) < 3:
+        return 0.0
+
+    count = len(prices)
+    fast_period = max(2, min(12, max(2, round(count * 0.35))))
+    slow_period = max(fast_period + 1, min(26, max(3, round(count * 0.70))))
+    signal_period = max(2, min(9, max(2, round(count * 0.25))))
+
+    fast_ema = _calculate_ema_series(prices, fast_period)
+    slow_ema = _calculate_ema_series(prices, slow_period)
+    macd_line = [fast - slow for fast, slow in zip(fast_ema, slow_ema)]
+    signal_line = _calculate_ema_series(macd_line, signal_period)
+
+    return macd_line[-1] - signal_line[-1]
+
 
 def calculate_linear_regression_slope(
     prices: List[float],
@@ -87,18 +180,28 @@ def calculate_trend_multiplier(
 
 
 def calculate_volatility(prices: List[float]) -> float:
-    """Calculate the standard deviation of prices.
+    """Calculate volatility as standard deviation of log returns.
 
     Args:
         prices: List of price values
 
     Returns:
-        Standard deviation of prices. Returns 0 if insufficient data.
+        Standard deviation of log returns. Returns 0 if insufficient data.
     """
     if len(prices) < 2:
         return 0.0
 
-    return statistics.stdev(prices)
+    log_returns: List[float] = []
+
+    for previous_price, current_price in zip(prices, prices[1:]):
+        if previous_price <= 0 or current_price <= 0:
+            continue
+        log_returns.append(math.log(current_price / previous_price))
+
+    if len(log_returns) < 2:
+        return 0.0
+
+    return statistics.stdev(log_returns)
 
 
 def calculate_volatility_penalty(
@@ -108,31 +211,28 @@ def calculate_volatility_penalty(
 ) -> float:
     """Convert volatility to a penalty factor.
 
-    Uses the coefficient of variation (CV = std_dev / mean) to create a
-    scale-independent volatility measure, then maps it to a penalty range.
+    Uses log-return volatility directly (already scale independent) and maps
+    it to a penalty range.
 
     Args:
-        volatility: Standard deviation of prices
-        mean_price: Mean price value
+        volatility: Standard deviation of log returns
+        mean_price: Mean price value (kept for API compatibility)
         max_penalty: Maximum penalty factor (default 2.0)
 
     Returns:
         A penalty factor in the range [1.0, max_penalty].
-        - Low volatility (CV < 0.05) -> penalty ~ 1.0
-        - Medium volatility (CV ~ 0.15) -> penalty ~ 1.3
-        - High volatility (CV > 0.30) -> penalty approaches max_penalty
+        - Low volatility (~0.03) -> penalty ~ 1.1
+        - Medium volatility (~0.10) -> penalty ~ 1.3
+        - High volatility (>0.30) -> penalty approaches max_penalty
     """
-    if mean_price <= 0 or volatility <= 0:
+    if volatility <= 0:
         return 1.0
 
-    # Calculate coefficient of variation
-    cv = volatility / mean_price
+    # Mean price is intentionally unused for compatibility with existing API.
+    _ = mean_price
 
-    # Map CV to penalty range [1.0, max_penalty]
-    # Using a logarithmic-like curve for smoother scaling
-    # CV of 0.30 (30% variation) should give roughly 1.5x penalty
-    # CV of 0.50 (50% variation) should approach max_penalty
-    penalty = 1.0 + (cv * 3.0)  # Linear scaling: 10% CV = 1.3 penalty
+    # Map log-return volatility to penalty range [1.0, max_penalty].
+    penalty = 1.0 + (volatility * 3.0)
     return max(1.0, min(max_penalty, penalty))
 
 
@@ -234,9 +334,24 @@ def calculate_metrics_from_history(
 
     # Calculate trend metrics
     slope = calculate_linear_regression_slope(prices, timestamps)
-    price_range = max(prices) - min(prices)
-    time_span = timestamps[-1] - timestamps[0] if len(timestamps) > 1 else 7 * 24 * 3600
-    trend_multiplier = calculate_trend_multiplier(slope, price_range, time_span)
+    robust_range = _calculate_robust_trend_range(prices)
+    time_span = max(timestamps[-1] - timestamps[0], 1)
+
+    # Use MACD-style momentum for the trend multiplier while preserving
+    # regression slope in output for backward compatibility.
+    if len(prices) >= 3:
+        macd_histogram = _calculate_macd_histogram(prices)
+        macd_sensitivity = 6.0
+        momentum_change = macd_histogram * macd_sensitivity
+        trend_slope_equivalent = momentum_change / time_span
+    else:
+        trend_slope_equivalent = slope
+
+    trend_multiplier = calculate_trend_multiplier(
+        trend_slope_equivalent,
+        robust_range,
+        time_span
+    )
     trend_direction = determine_trend_direction(trend_multiplier)
 
     # Calculate volatility metrics
@@ -284,8 +399,8 @@ def calculate_score_contributions(
     # Base score: profit * log(volume)
     base_score = profit * volume_factor
 
-    # ROI factor: multiply by (1 + roi/100)
-    roi_factor = 1.0 + (roi / 100.0)
+    # ROI contribution mirrors the sign-preserving score adjustment.
+    roi_factor = calculate_sign_preserving_roi_factor(base_score=base_score, roi=roi)
 
     # Calculate step-by-step contributions
     profit_contribution = profit

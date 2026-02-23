@@ -98,6 +98,24 @@ def sample_profit_data() -> list:
             "part_cost": 100.0,
             "profit_margin": 50.0,
             "profit_percentage": 50.0,
+            "instant_set_price": 130.0,
+            "instant_part_cost": 100.0,
+            "instant_profit_margin": 30.0,
+            "instant_profit_percentage": 30.0,
+            "patient_set_price": 150.0,
+            "patient_part_cost": 80.0,
+            "patient_profit_margin": 70.0,
+            "patient_profit_percentage": 87.5,
+            "set_lowest_price": 150.0,
+            "set_highest_bid": 130.0,
+            "set_top_sell_orders": [
+                {"platinum": 150.0, "quantity": 3},
+                {"platinum": 152.0, "quantity": 2},
+            ],
+            "set_top_buy_orders": [
+                {"platinum": 130.0, "quantity": 4},
+                {"platinum": 128.0, "quantity": 3},
+            ],
             "part_details": [],
         },
         {
@@ -107,6 +125,24 @@ def sample_profit_data() -> list:
             "part_cost": 180.0,
             "profit_margin": 20.0,
             "profit_percentage": 11.1,
+            "instant_set_price": 175.0,
+            "instant_part_cost": 180.0,
+            "instant_profit_margin": -5.0,
+            "instant_profit_percentage": -2.78,
+            "patient_set_price": 200.0,
+            "patient_part_cost": 150.0,
+            "patient_profit_margin": 50.0,
+            "patient_profit_percentage": 33.33,
+            "set_lowest_price": 200.0,
+            "set_highest_bid": 175.0,
+            "set_top_sell_orders": [
+                {"platinum": 200.0, "quantity": 6},
+                {"platinum": 205.0, "quantity": 4},
+            ],
+            "set_top_buy_orders": [
+                {"platinum": 175.0, "quantity": 2},
+                {"platinum": 172.0, "quantity": 2},
+            ],
             "part_details": [],
         },
         {
@@ -116,6 +152,23 @@ def sample_profit_data() -> list:
             "part_cost": 60.0,
             "profit_margin": 20.0,
             "profit_percentage": 33.3,
+            "instant_set_price": 70.0,
+            "instant_part_cost": 60.0,
+            "instant_profit_margin": 10.0,
+            "instant_profit_percentage": 16.67,
+            "patient_set_price": 80.0,
+            "patient_part_cost": 55.0,
+            "patient_profit_margin": 25.0,
+            "patient_profit_percentage": 45.45,
+            "set_lowest_price": 80.0,
+            "set_highest_bid": 70.0,
+            "set_top_sell_orders": [
+                {"platinum": 80.0, "quantity": 2},
+            ],
+            "set_top_buy_orders": [
+                {"platinum": 70.0, "quantity": 5},
+                {"platinum": 68.0, "quantity": 3},
+            ],
             "part_details": [],
         },
     ]
@@ -172,9 +225,43 @@ def sample_trend_metrics() -> dict:
 def sample_set_prices() -> list:
     """Sample set prices for profit calculation tests."""
     return [
-        {"slug": "saryn_prime_set", "lowest_price": 150.0},
-        {"slug": "mesa_prime_set", "lowest_price": 200.0},
-        {"slug": "volt_prime_set", "lowest_price": 80.0},
+        {
+            "slug": "saryn_prime_set",
+            "lowest_price": 150.0,
+            "highest_bid": 130.0,
+            "top_sell_orders": [
+                {"platinum": 150.0, "quantity": 1},
+                {"platinum": 152.0, "quantity": 3},
+            ],
+            "top_buy_orders": [
+                {"platinum": 130.0, "quantity": 1},
+                {"platinum": 128.0, "quantity": 2},
+            ],
+        },
+        {
+            "slug": "mesa_prime_set",
+            "lowest_price": 200.0,
+            "highest_bid": 175.0,
+            "top_sell_orders": [
+                {"platinum": 200.0, "quantity": 2},
+                {"platinum": 205.0, "quantity": 2},
+            ],
+            "top_buy_orders": [
+                {"platinum": 175.0, "quantity": 1},
+                {"platinum": 172.0, "quantity": 4},
+            ],
+        },
+        {
+            "slug": "volt_prime_set",
+            "lowest_price": 80.0,
+            "highest_bid": 70.0,
+            "top_sell_orders": [
+                {"platinum": 80.0, "quantity": 3},
+            ],
+            "top_buy_orders": [
+                {"platinum": 70.0, "quantity": 2},
+            ],
+        },
     ]
 
 
@@ -182,14 +269,118 @@ def sample_set_prices() -> list:
 def sample_part_prices() -> list:
     """Sample part prices for profit calculation tests."""
     return [
-        {"slug": "saryn_prime_blueprint", "lowest_price": 25.0, "quantity_in_set": 1},
-        {"slug": "saryn_prime_chassis", "lowest_price": 25.0, "quantity_in_set": 1},
-        {"slug": "saryn_prime_neuroptics", "lowest_price": 25.0, "quantity_in_set": 1},
-        {"slug": "saryn_prime_systems", "lowest_price": 25.0, "quantity_in_set": 1},
-        {"slug": "mesa_prime_blueprint", "lowest_price": 45.0, "quantity_in_set": 1},
-        {"slug": "mesa_prime_chassis", "lowest_price": 45.0, "quantity_in_set": 1},
-        {"slug": "mesa_prime_neuroptics", "lowest_price": 45.0, "quantity_in_set": 1},
-        {"slug": "mesa_prime_systems", "lowest_price": 45.0, "quantity_in_set": 1},
+        {
+            "slug": "saryn_prime_blueprint",
+            "lowest_price": 25.0,
+            "highest_bid": 20.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 25.0, "quantity": 2},
+                {"platinum": 26.0, "quantity": 4},
+            ],
+            "top_buy_orders": [
+                {"platinum": 20.0, "quantity": 2},
+                {"platinum": 19.0, "quantity": 5},
+            ],
+        },
+        {
+            "slug": "saryn_prime_chassis",
+            "lowest_price": 25.0,
+            "highest_bid": 20.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 25.0, "quantity": 3},
+                {"platinum": 26.0, "quantity": 2},
+            ],
+            "top_buy_orders": [
+                {"platinum": 20.0, "quantity": 1},
+                {"platinum": 19.0, "quantity": 4},
+            ],
+        },
+        {
+            "slug": "saryn_prime_neuroptics",
+            "lowest_price": 25.0,
+            "highest_bid": 20.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 25.0, "quantity": 2},
+                {"platinum": 27.0, "quantity": 5},
+            ],
+            "top_buy_orders": [
+                {"platinum": 20.0, "quantity": 3},
+                {"platinum": 18.0, "quantity": 6},
+            ],
+        },
+        {
+            "slug": "saryn_prime_systems",
+            "lowest_price": 25.0,
+            "highest_bid": 20.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 25.0, "quantity": 1},
+                {"platinum": 28.0, "quantity": 3},
+            ],
+            "top_buy_orders": [
+                {"platinum": 20.0, "quantity": 2},
+                {"platinum": 17.0, "quantity": 7},
+            ],
+        },
+        {
+            "slug": "mesa_prime_blueprint",
+            "lowest_price": 45.0,
+            "highest_bid": 38.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 45.0, "quantity": 2},
+                {"platinum": 46.0, "quantity": 3},
+            ],
+            "top_buy_orders": [
+                {"platinum": 38.0, "quantity": 2},
+                {"platinum": 37.0, "quantity": 4},
+            ],
+        },
+        {
+            "slug": "mesa_prime_chassis",
+            "lowest_price": 45.0,
+            "highest_bid": 38.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 45.0, "quantity": 3},
+                {"platinum": 47.0, "quantity": 5},
+            ],
+            "top_buy_orders": [
+                {"platinum": 38.0, "quantity": 1},
+                {"platinum": 36.0, "quantity": 4},
+            ],
+        },
+        {
+            "slug": "mesa_prime_neuroptics",
+            "lowest_price": 45.0,
+            "highest_bid": 38.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 45.0, "quantity": 2},
+                {"platinum": 47.0, "quantity": 2},
+            ],
+            "top_buy_orders": [
+                {"platinum": 38.0, "quantity": 3},
+                {"platinum": 35.0, "quantity": 4},
+            ],
+        },
+        {
+            "slug": "mesa_prime_systems",
+            "lowest_price": 45.0,
+            "highest_bid": 38.0,
+            "quantity_in_set": 1,
+            "top_sell_orders": [
+                {"platinum": 45.0, "quantity": 2},
+                {"platinum": 48.0, "quantity": 4},
+            ],
+            "top_buy_orders": [
+                {"platinum": 38.0, "quantity": 2},
+                {"platinum": 36.0, "quantity": 3},
+            ],
+        },
     ]
 
 
@@ -249,10 +440,22 @@ def sample_scored_data() -> list:
             "part_cost": 100.0,
             "profit_margin": 50.0,
             "profit_percentage": 50.0,
+            "instant_set_price": 130.0,
+            "instant_part_cost": 100.0,
+            "instant_profit_margin": 30.0,
+            "instant_profit_percentage": 30.0,
+            "patient_set_price": 150.0,
+            "patient_part_cost": 80.0,
+            "patient_profit_margin": 70.0,
+            "patient_profit_percentage": 87.5,
             "volume": 150,
             "trend_multiplier": 1.1,
             "volatility_penalty": 1.3,
             "composite_score": 100.0,
+            "liquidity_multiplier": 1.1,
+            "bid_ask_ratio": 0.87,
+            "sell_side_competition": 0.6,
+            "liquidity_velocity": 1.45,
         },
         {
             "set_slug": "mesa_prime_set",
@@ -261,9 +464,21 @@ def sample_scored_data() -> list:
             "part_cost": 180.0,
             "profit_margin": 20.0,
             "profit_percentage": 11.1,
+            "instant_set_price": 175.0,
+            "instant_part_cost": 180.0,
+            "instant_profit_margin": -5.0,
+            "instant_profit_percentage": -2.78,
+            "patient_set_price": 200.0,
+            "patient_part_cost": 150.0,
+            "patient_profit_margin": 50.0,
+            "patient_profit_percentage": 33.33,
             "volume": 300,
             "trend_multiplier": 0.9,
             "volatility_penalty": 1.1,
             "composite_score": 50.0,
+            "liquidity_multiplier": 0.9,
+            "bid_ask_ratio": 0.88,
+            "sell_side_competition": 1.8,
+            "liquidity_velocity": 0.49,
         },
     ]

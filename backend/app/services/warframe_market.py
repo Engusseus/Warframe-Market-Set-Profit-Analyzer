@@ -373,6 +373,72 @@ class WarframeMarketService:
             'setParts': parts_with_quantities
         }
 
+    @staticmethod
+    def _normalize_order_quantity(raw_quantity: Any) -> int:
+        """Normalize API order quantity values."""
+        try:
+            quantity = int(float(raw_quantity))
+        except (TypeError, ValueError):
+            return 1
+        return quantity if quantity > 0 else 1
+
+    def _extract_order_levels(
+        self,
+        orders: List[Any]
+    ) -> Tuple[List[float], List[Dict[str, Any]]]:
+        """Extract valid prices and order levels from parsed API orders."""
+        prices: List[float] = []
+        levels: List[Dict[str, Any]] = []
+
+        for order in orders:
+            price = float(order.platinum)
+            if price <= 0:
+                continue
+
+            quantity = self._normalize_order_quantity(getattr(order, "quantity", 1))
+            prices.append(price)
+            levels.append({
+                "platinum": price,
+                "quantity": quantity
+            })
+
+        return prices, levels
+
+    async def fetch_item_orderbook(self, item_identifier: str) -> Dict[str, Any]:
+        """Fetch top sell/buy orders with quantity for a specific item."""
+        url = f"{self.v2_url}/orders/item/{item_identifier}/top"
+        response = await self._fetch_with_retry(url)
+
+        empty_result = {
+            "sell_prices": [],
+            "buy_prices": [],
+            "top_sell_orders": [],
+            "top_buy_orders": [],
+            "lowest_price": 0.0,
+            "highest_bid": 0.0,
+        }
+        if response is None:
+            return empty_result
+
+        try:
+            data = response.json()
+            from ..models.warframe_market import WFMOrdersResponse
+            parsed = WFMOrdersResponse.model_validate(data)
+
+            sell_prices, top_sell_orders = self._extract_order_levels(parsed.data.sell)
+            buy_prices, top_buy_orders = self._extract_order_levels(parsed.data.buy)
+
+            return {
+                "sell_prices": sell_prices,
+                "buy_prices": buy_prices,
+                "top_sell_orders": top_sell_orders,
+                "top_buy_orders": top_buy_orders,
+                "lowest_price": min(sell_prices) if sell_prices else 0.0,
+                "highest_bid": max(buy_prices) if buy_prices else 0.0,
+            }
+        except Exception:
+            return empty_result
+
     async def fetch_item_prices(self, item_identifier: str) -> List[float]:
         """Fetch top sell orders for a specific item.
 
@@ -382,26 +448,8 @@ class WarframeMarketService:
         Returns:
             List of platinum prices
         """
-        url = f"{self.v2_url}/orders/item/{item_identifier}/top"
-        response = await self._fetch_with_retry(url)
-
-        if response is None:
-            return []
-
-        try:
-            data = response.json()
-            from ..models.warframe_market import WFMOrdersResponse
-            parsed = WFMOrdersResponse.model_validate(data)
-
-            # Extract and validate prices
-            sell_prices = []
-            for order in parsed.data.sell:
-                if order.platinum > 0:
-                    sell_prices.append(order.platinum)
-
-            return sell_prices
-        except Exception:
-            return []
+        orderbook = await self.fetch_item_orderbook(item_identifier)
+        return orderbook.get("sell_prices", [])
 
     async def fetch_set_lowest_prices(
         self,
@@ -425,7 +473,8 @@ class WarframeMarketService:
             if not set_slug:
                 return None
 
-            prices = await self.fetch_item_prices(set_slug)
+            orderbook = await self.fetch_item_orderbook(set_slug)
+            prices = orderbook.get("sell_prices", [])
             if not prices:
                 return None
 
@@ -435,9 +484,12 @@ class WarframeMarketService:
                 'name': set_name,
                 'id': set_id,
                 'lowest_price': stats['lowest'],
+                'highest_bid': orderbook.get('highest_bid', 0.0),
                 'price_count': stats['count'],
                 'min_price': stats['min'],
-                'max_price': stats['max']
+                'max_price': stats['max'],
+                'top_sell_orders': orderbook.get('top_sell_orders', []),
+                'top_buy_orders': orderbook.get('top_buy_orders', []),
             }
 
         results = await self._map_with_concurrency(
@@ -479,7 +531,8 @@ class WarframeMarketService:
             if not part_code:
                 return None
 
-            prices = await self.fetch_item_prices(part_code)
+            orderbook = await self.fetch_item_orderbook(part_code)
+            prices = orderbook.get("sell_prices", [])
             if not prices:
                 return None
 
@@ -488,10 +541,13 @@ class WarframeMarketService:
                 'slug': part_code,
                 'name': part_name,
                 'lowest_price': stats['lowest'],
+                'highest_bid': orderbook.get('highest_bid', 0.0),
                 'price_count': stats['count'],
                 'min_price': stats['min'],
                 'max_price': stats['max'],
-                'quantity_in_set': part.get('quantityInSet', 1)
+                'quantity_in_set': part.get('quantityInSet', 1),
+                'top_sell_orders': orderbook.get('top_sell_orders', []),
+                'top_buy_orders': orderbook.get('top_buy_orders', []),
             }
 
         results = await self._map_with_concurrency(

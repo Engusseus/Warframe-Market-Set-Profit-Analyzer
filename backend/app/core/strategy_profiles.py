@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict
 
+from .roi import calculate_sign_preserving_roi_factor
+
 
 class StrategyType(str, Enum):
     """Available trading strategy types."""
@@ -86,7 +88,7 @@ def apply_strategy_weights(
     """Apply strategy-specific weights to calculate the final composite score.
 
     The base formula is:
-        Score = (Profit * log10(Volume)) * ROI * TrendMultiplier / VolatilityPenalty
+        Score = (Profit * log10(Volume)) * ROI_factor * TrendMultiplier / VolatilityPenalty
 
     This function modifies how strongly each factor affects the final score
     based on the chosen strategy.
@@ -111,9 +113,14 @@ def apply_strategy_weights(
     # Higher weight = trend deviations have more impact
     adjusted_trend = 1.0 + (trend_multiplier - 1.0) * profile.trend_weight
 
-    # Adjust ROI contribution based on strategy
-    # Higher weight = ROI has more impact
-    roi_factor = 1.0 + (roi / 100.0) * profile.roi_weight
+    # Adjust ROI contribution based on strategy.
+    # Uses sign-preserving scaling so negative base scores with negative ROI
+    # become more negative instead of collapsing toward zero.
+    roi_factor = calculate_sign_preserving_roi_factor(
+        base_score=base_score,
+        roi=roi,
+        weight=profile.roi_weight
+    )
 
     # Calculate final score
     score = (base_score * roi_factor * adjusted_trend) / adjusted_penalty
