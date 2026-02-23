@@ -4,7 +4,7 @@ Async service for interacting with the Warframe Market API.
 """
 import asyncio
 import statistics
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -37,6 +37,9 @@ class WarframeMarketService:
             max_requests=settings.rate_limit_requests,
             time_window=settings.rate_limit_window
         )
+        # Keep worker concurrency aligned with configured request burst size.
+        # The rate limiter still enforces global API request limits.
+        self.max_concurrent_requests = max(1, settings.rate_limit_requests)
         self._client = http_client
         self._owns_client = http_client is None
 
@@ -51,6 +54,64 @@ class WarframeMarketService:
         if self._owns_client and self._client is not None:
             await self._client.aclose()
             self._client = None
+
+    async def _map_with_concurrency(
+        self,
+        items: List[Any],
+        worker: Callable[[Any], Awaitable[Any]],
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        progress_message: Optional[Callable[[Any], str]] = None
+    ) -> List[Any]:
+        """Process items with bounded concurrency while preserving order."""
+        if not items:
+            return []
+
+        logger = get_logger()
+        semaphore = asyncio.Semaphore(self.max_concurrent_requests)
+        progress_lock = asyncio.Lock()
+        total = len(items)
+        completed = 0
+        results: List[Any] = [None] * total
+
+        async def _run(index: int, item: Any) -> None:
+            nonlocal completed
+            try:
+                async with semaphore:
+                    results[index] = await worker(item)
+            except Exception as e:
+                logger.warning(f"Concurrent worker failed for {item!r}: {e}")
+                results[index] = None
+            finally:
+                if progress_callback:
+                    async with progress_lock:
+                        completed += 1
+                        message = progress_message(item) if progress_message else "Processing..."
+                        progress_callback(completed, total, message)
+
+        await asyncio.gather(*(_run(i, item) for i, item in enumerate(items)))
+        return results
+
+    async def _fetch_part_quantities(
+        self,
+        part_codes: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Fetch part quantity metadata once per unique part code."""
+        unique_codes: List[str] = []
+        seen_codes = set()
+        for code in part_codes:
+            if code and code not in seen_codes:
+                seen_codes.add(code)
+                unique_codes.append(code)
+
+        async def _fetch(code: str) -> Dict[str, Any]:
+            return await self.fetch_part_quantity(code)
+
+        part_infos = await self._map_with_concurrency(unique_codes, _fetch)
+        part_lookup: Dict[str, Dict[str, Any]] = {}
+        for code, info in zip(unique_codes, part_infos):
+            if isinstance(info, dict):
+                part_lookup[code] = info
+        return part_lookup
 
     async def _fetch_with_retry(
         self,
@@ -132,15 +193,18 @@ class WarframeMarketService:
                 'count': 0
             }
 
+        lowest = min(prices)
+        highest = max(prices)
+        count = len(prices)
         stats = {
-            'lowest': min(prices),
-            'mean': statistics.mean(prices),
-            'min': min(prices),
-            'max': max(prices),
-            'count': len(prices)
+            'lowest': lowest,
+            'mean': statistics.fmean(prices),
+            'min': lowest,
+            'max': highest,
+            'count': count
         }
 
-        if len(prices) > 1:
+        if count > 1:
             stats['std_dev'] = statistics.stdev(prices)
         else:
             stats['std_dev'] = 0
@@ -280,11 +344,18 @@ class WarframeMarketService:
             logger.warning(f"Canary check: failed to fetch set details for {slug}")
             return None
 
-        # Fetch part quantities (same as in fetch_complete_set_data)
-        parts_with_quantities = []
-        for part_code in set_details['setParts']:
-            part_info = await self.fetch_part_quantity(part_code)
-            parts_with_quantities.append(part_info)
+        part_lookup = await self._fetch_part_quantities(set_details['setParts'])
+        parts_with_quantities = [
+            dict(part_lookup.get(
+                part_code,
+                {
+                    "code": part_code,
+                    "name": part_code.replace('_', ' ').title(),
+                    "quantityInSet": 1
+                }
+            ))
+            for part_code in set_details['setParts']
+        ]
 
         return {
             'id': set_details['id'],
@@ -347,35 +418,36 @@ class WarframeMarketService:
         Returns:
             List of set pricing data
         """
-        lowest_prices = []
-        total = len(detailed_sets)
-
-        for i, set_data in enumerate(detailed_sets):
+        async def _fetch_for_set(set_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             set_name = set_data.get('name', 'Unknown Set')
             set_id = set_data.get('id', '')
             set_slug = set_data.get('slug', '')
 
             if not set_slug:
-                continue
-
-            if progress_callback:
-                progress_callback(i + 1, total, f"Fetching prices for {set_name}")
+                return None
 
             prices = await self.fetch_item_prices(set_slug)
+            if not prices:
+                return None
 
-            if prices:
-                stats = self._calculate_pricing_statistics(prices)
-                lowest_prices.append({
-                    'slug': set_slug,
-                    'name': set_name,
-                    'id': set_id,
-                    'lowest_price': stats['lowest'],
-                    'price_count': stats['count'],
-                    'min_price': stats['min'],
-                    'max_price': stats['max']
-                })
+            stats = self._calculate_pricing_statistics(prices)
+            return {
+                'slug': set_slug,
+                'name': set_name,
+                'id': set_id,
+                'lowest_price': stats['lowest'],
+                'price_count': stats['count'],
+                'min_price': stats['min'],
+                'max_price': stats['max']
+            }
 
-        return lowest_prices
+        results = await self._map_with_concurrency(
+            detailed_sets,
+            _fetch_for_set,
+            progress_callback=progress_callback,
+            progress_message=lambda s: f"Fetching prices for {s.get('name', 'Unknown Set')}"
+        )
+        return [item for item in results if item]
 
     async def fetch_part_lowest_prices(
         self,
@@ -401,34 +473,35 @@ class WarframeMarketService:
                     unique_parts[part_code] = part
 
         all_parts = list(unique_parts.values())
-        part_lowest_prices = []
-        total = len(all_parts)
 
-        for i, part in enumerate(all_parts):
+        async def _fetch_for_part(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             part_code = part.get('code', '')
             part_name = part.get('name', 'Unknown Part')
-
             if not part_code:
-                continue
-
-            if progress_callback:
-                progress_callback(i + 1, total, f"Fetching prices for {part_name}")
+                return None
 
             prices = await self.fetch_item_prices(part_code)
+            if not prices:
+                return None
 
-            if prices:
-                stats = self._calculate_pricing_statistics(prices)
-                part_lowest_prices.append({
-                    'slug': part_code,
-                    'name': part_name,
-                    'lowest_price': stats['lowest'],
-                    'price_count': stats['count'],
-                    'min_price': stats['min'],
-                    'max_price': stats['max'],
-                    'quantity_in_set': part.get('quantityInSet', 1)
-                })
+            stats = self._calculate_pricing_statistics(prices)
+            return {
+                'slug': part_code,
+                'name': part_name,
+                'lowest_price': stats['lowest'],
+                'price_count': stats['count'],
+                'min_price': stats['min'],
+                'max_price': stats['max'],
+                'quantity_in_set': part.get('quantityInSet', 1)
+            }
 
-        return part_lowest_prices
+        results = await self._map_with_concurrency(
+            all_parts,
+            _fetch_for_part,
+            progress_callback=progress_callback,
+            progress_message=lambda p: f"Fetching prices for {p.get('name', 'Unknown Part')}"
+        )
+        return [item for item in results if item]
 
     async def fetch_set_volume(
         self,
@@ -444,27 +517,17 @@ class WarframeMarketService:
         Returns:
             Dict with 'individual' volumes and 'total'
         """
-        volume_data = {}
-        total_volume = 0
-        total = len(detailed_sets)
-
-        for i, set_data in enumerate(detailed_sets):
-            set_name = set_data.get('name', 'Unknown Set')
+        async def _fetch_volume_for_set(
+            set_data: Dict[str, Any]
+        ) -> Optional[Tuple[str, float]]:
             set_slug = set_data.get('slug', '')
-
             if not set_slug:
-                continue
+                return None
 
-            if progress_callback:
-                progress_callback(i + 1, total, f"Fetching volume for {set_name}")
-
-            # Use v1 statistics endpoint
             url = f"{self.v1_url}/items/{set_slug}/statistics"
             response = await self._fetch_with_retry(url)
-
             if response is None:
-                volume_data[set_slug] = 0
-                continue
+                return (set_slug, 0)
 
             try:
                 data = response.json()
@@ -472,18 +535,32 @@ class WarframeMarketService:
                 statistics_closed = payload.get("statistics_closed", {})
                 hours_48_data = statistics_closed.get("48hours", [])
 
-                # Sum up all volume values from 48hours data
-                set_volume = 0
+                set_volume = 0.0
                 for entry in hours_48_data:
                     if isinstance(entry, dict):
                         volume = entry.get("volume", 0)
                         if isinstance(volume, (int, float)) and volume >= 0:
                             set_volume += volume
 
-                volume_data[set_slug] = set_volume
-                total_volume += set_volume
+                return (set_slug, set_volume)
             except Exception:
-                volume_data[set_slug] = 0
+                return (set_slug, 0)
+
+        results = await self._map_with_concurrency(
+            detailed_sets,
+            _fetch_volume_for_set,
+            progress_callback=progress_callback,
+            progress_message=lambda s: f"Fetching volume for {s.get('name', 'Unknown Set')}"
+        )
+
+        volume_data: Dict[str, float] = {}
+        total_volume = 0.0
+        for item in results:
+            if not item:
+                continue
+            slug, set_volume = item
+            volume_data[slug] = set_volume
+            total_volume += set_volume
 
         return {'individual': volume_data, 'total': total_volume}
 
@@ -503,8 +580,7 @@ class WarframeMarketService:
         Returns:
             List of detailed set data with parts
         """
-        detailed_sets = []
-        total = len(prime_sets)
+        detailed_sets: List[Dict[str, Any]] = []
 
         # Sort alphabetically
         prime_sets_sorted = sorted(
@@ -512,39 +588,67 @@ class WarframeMarketService:
             key=lambda x: x.get('i18n', {}).get('en', {}).get('name', x.get('slug', ''))
         )
 
-        for i, item in enumerate(prime_sets_sorted):
+        async def _fetch_details(item: Dict[str, Any]) -> Dict[str, Any]:
             slug = item.get('slug', '')
+            details = await self.fetch_set_details(slug) if slug else None
+            return {
+                "slug": slug,
+                "details": details,
+                "item": item
+            }
 
-            if progress_callback:
-                progress_callback(i + 1, total, f"Fetching details for {slug}")
+        detail_results = await self._map_with_concurrency(
+            prime_sets_sorted,
+            _fetch_details,
+            progress_callback=progress_callback,
+            progress_message=lambda item: f"Fetching details for {item.get('slug', '')}"
+        )
 
-            set_details = await self.fetch_set_details(slug)
+        detail_lookup: Dict[str, Dict[str, Any]] = {}
+        all_part_codes: List[str] = []
+        for result in detail_results:
+            if not result:
+                continue
+            slug = result.get("slug", "")
+            details = result.get("details")
+            if slug and details:
+                detail_lookup[slug] = details
+                all_part_codes.extend(details.get('setParts', []))
 
+        part_lookup = await self._fetch_part_quantities(all_part_codes)
+
+        for item in prime_sets_sorted:
+            slug = item.get('slug', '')
+            set_details = detail_lookup.get(slug)
             if set_details:
-                # Fetch part quantities
-                parts_with_quantities = []
-                for part_code in set_details['setParts']:
-                    part_info = await self.fetch_part_quantity(part_code)
-                    parts_with_quantities.append(part_info)
+                parts_with_quantities = [
+                    dict(part_lookup.get(
+                        part_code,
+                        {
+                            "code": part_code,
+                            "name": part_code.replace('_', ' ').title(),
+                            "quantityInSet": 1
+                        }
+                    ))
+                    for part_code in set_details.get('setParts', [])
+                ]
 
-                complete_set_data = {
-                    'id': set_details['id'],
-                    'name': set_details['name'],
+                detailed_sets.append({
+                    'id': set_details.get('id', ''),
+                    'name': set_details.get('name', slug.replace('_', ' ').title()),
                     'slug': slug,
                     'setParts': parts_with_quantities
-                }
-                detailed_sets.append(complete_set_data)
+                })
             else:
                 # Fallback for unavailable details
                 i18n = item.get('i18n', {})
                 en_info = i18n.get('en', {})
                 name = en_info.get('name', slug.replace('_', ' ').title())
-                fallback_data = {
+                detailed_sets.append({
                     'id': '',
                     'name': name,
                     'slug': slug,
                     'setParts': []
-                }
-                detailed_sets.append(fallback_data)
+                })
 
         return detailed_sets

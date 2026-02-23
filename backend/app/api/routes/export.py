@@ -1,6 +1,8 @@
 """Export API routes."""
+import anyio
+
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from ...db.database import get_database_instance
 from ...models.schemas import ExportResponse
@@ -43,10 +45,20 @@ async def export_to_file():
         # Save to file
         output_path = await db.save_json_export()
 
-        return FileResponse(
-            path=output_path,
-            filename="market_data_export.json",
-            media_type="application/json"
+        async def stream_file():
+            async with await anyio.open_file(output_path, "rb") as f:
+                while True:
+                    chunk = await f.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        return StreamingResponse(
+            stream_file(),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": "attachment; filename=market_data_export.json"
+            }
         )
 
     except Exception as e:
