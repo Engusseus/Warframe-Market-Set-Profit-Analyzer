@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { ScoredSet, AnalysisResponse, WeightsConfig, StrategyType } from '../api/types';
+import type {
+  ScoredSet,
+  AnalysisResponse,
+  WeightsConfig,
+  StrategyType,
+  ExecutionMode,
+} from '../api/types';
+
+type SortBy = 'score' | 'profit' | 'volume' | 'roi' | 'trend' | 'risk' | 'liquidity';
 
 interface AnalysisState {
   // Data
@@ -14,13 +22,14 @@ interface AnalysisState {
 
   // Strategy
   strategy: StrategyType;
+  executionMode: ExecutionMode;
 
   // Weights (legacy, for backward compatibility)
   weights: WeightsConfig;
 
   // UI State
   selectedSet: ScoredSet | null;
-  sortBy: 'score' | 'profit' | 'volume' | 'roi' | 'trend' | 'risk';
+  sortBy: SortBy;
   sortOrder: 'asc' | 'desc';
 
   // Actions
@@ -29,9 +38,10 @@ interface AnalysisState {
   setError: (error: string | null) => void;
   setProgress: (progress: number | null, message?: string | null) => void;
   setStrategy: (strategy: StrategyType) => void;
+  setExecutionMode: (executionMode: ExecutionMode) => void;
   setWeights: (profit: number, volume: number) => void;
   setSelectedSet: (set: ScoredSet | null) => void;
-  setSorting: (sortBy: 'score' | 'profit' | 'volume' | 'roi' | 'trend' | 'risk', sortOrder: 'asc' | 'desc') => void;
+  setSorting: (sortBy: SortBy, sortOrder: 'asc' | 'desc') => void;
   reset: () => void;
 }
 
@@ -42,6 +52,7 @@ const initialState = {
   progress: null,
   progressMessage: null,
   strategy: 'balanced' as StrategyType,
+  executionMode: 'instant' as ExecutionMode,
   weights: { strategy: 'balanced' as StrategyType, profit_weight: 1.0, volume_weight: 1.2 },
   selectedSet: null,
   sortBy: 'score' as const,
@@ -53,14 +64,15 @@ export const useAnalysisStore = create<AnalysisState>()(
     (set) => ({
       ...initialState,
 
-      setAnalysis: (analysis) => set({
+      setAnalysis: (analysis) => set((state) => ({
         currentAnalysis: analysis,
         strategy: analysis.strategy || 'balanced',
+        executionMode: analysis.execution_mode || state.executionMode,
         weights: analysis.weights,
         error: null,
         progress: null,
         progressMessage: null,
-      }),
+      })),
 
       setLoading: (loading) => {
         set({
@@ -74,6 +86,8 @@ export const useAnalysisStore = create<AnalysisState>()(
       setProgress: (progress, message = null) => set({ progress, progressMessage: message }),
 
       setStrategy: (strategy) => set({ strategy }),
+
+      setExecutionMode: (executionMode) => set({ executionMode }),
 
       setWeights: (profit, volume) => set({
         weights: { strategy: 'balanced', profit_weight: profit, volume_weight: volume },
@@ -90,6 +104,7 @@ export const useAnalysisStore = create<AnalysisState>()(
       partialize: (state) => ({
         currentAnalysis: state.currentAnalysis,
         strategy: state.strategy,
+        executionMode: state.executionMode,
         weights: state.weights,
         sortBy: state.sortBy,
         sortOrder: state.sortOrder,
@@ -124,10 +139,15 @@ export function getSortedSets(state: AnalysisState): ScoredSet[] {
         aVal = a.trend_multiplier;
         bVal = b.trend_multiplier;
         break;
-      case 'risk':
+      case 'risk': {
         const riskOrder: Record<string, number> = { Low: 0, Medium: 1, High: 2 };
         aVal = riskOrder[a.risk_level] ?? 1;
         bVal = riskOrder[b.risk_level] ?? 1;
+        break;
+      }
+      case 'liquidity':
+        aVal = a.liquidity_multiplier ?? 1;
+        bVal = b.liquidity_multiplier ?? 1;
         break;
       case 'score':
       default:

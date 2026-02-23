@@ -7,18 +7,21 @@ import type {
   RunDetail,
   SetDetail,
   StrategyType,
+  ExecutionMode,
   StrategyProfile,
   RescoreResponse,
 } from './types';
 
 export async function runAnalysis(
   strategy: StrategyType = 'balanced',
+  executionMode: ExecutionMode = 'instant',
   forceRefresh: boolean = false,
   testMode: boolean = false
 ): Promise<AnalysisResponse> {
   const response = await apiClient.get<AnalysisResponse>('/analysis', {
     params: {
       strategy,
+      execution_mode: executionMode,
       force_refresh: forceRefresh,
       test_mode: testMode,
     },
@@ -32,11 +35,13 @@ export async function getAnalysisStatus(): Promise<AnalysisStatus> {
 }
 
 export async function rescoreAnalysis(
-  strategy: StrategyType
+  strategy: StrategyType,
+  executionMode: ExecutionMode = 'instant'
 ): Promise<RescoreResponse> {
   const response = await apiClient.post<RescoreResponse>('/analysis/rescore', null, {
     params: {
       strategy,
+      execution_mode: executionMode,
     },
   });
   return response.data;
