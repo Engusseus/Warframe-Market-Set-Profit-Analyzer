@@ -44,29 +44,28 @@ class RateLimiter:
         """Wait if necessary to maintain rate limit.
 
         This is an async method that will yield control while waiting,
-        allowing other coroutines to run.
+        allowing other coroutines to run without blocking the lock.
         """
-        async with self._lock:
-            current_time = time.monotonic()
-
-            # Remove requests older than time_window
-            self._cleanup_old_requests(current_time)
-
-            # If we're at the limit, wait until the oldest request expires
-            if len(self.requests) >= self.max_requests:
-                # Calculate when the oldest request will expire
-                oldest_request_time = self.requests[0]
-                sleep_time = self.time_window - (current_time - oldest_request_time)
-
-                if sleep_time > 0:
-                    await asyncio.sleep(sleep_time)
-
-                    # Clean up after waiting
-                    current_time = time.monotonic()
-                    self._cleanup_old_requests(current_time)
-
-            # Record this request
-            self.requests.append(current_time)
+        while True:
+            sleep_time = 0
+            async with self._lock:
+                current_time = time.monotonic()
+                
+                # Remove requests older than time_window
+                self._cleanup_old_requests(current_time)
+                
+                # If we're at the limit, calculate sleep time
+                if len(self.requests) >= self.max_requests:
+                    oldest_request_time = self.requests[0]
+                    sleep_time = self.time_window - (current_time - oldest_request_time)
+                else:
+                    # We have capacity, record request and return
+                    self.requests.append(current_time)
+                    return
+            
+            # Wait outside the lock if necessary
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
 
     def get_current_rate(self) -> int:
         """Get the current number of requests in the time window."""

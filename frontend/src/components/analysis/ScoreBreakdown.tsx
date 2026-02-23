@@ -1,4 +1,4 @@
-import clsx from 'clsx';
+import { cn } from '../common/SpotlightCard';
 import type { ScoredSet } from '../../api/types';
 
 interface ScoreBreakdownProps {
@@ -8,94 +8,100 @@ interface ScoreBreakdownProps {
 export function ScoreBreakdown({ set }: ScoreBreakdownProps) {
   const contributions = [
     {
-      label: 'Profit',
+      label: 'Profit Margin',
       value: set.profit_contribution,
-      formula: `${set.profit_margin.toFixed(0)} plat`,
-      color: 'bg-mint',
-      textColor: 'text-mint',
+      formula: `${set.profit_margin.toFixed(0)} pt`,
+      color: 'bg-[#00ffaa]',
+      textColor: 'text-[#00ffaa]',
     },
     {
-      label: 'Volume (log)',
+      label: 'Volume (log10)',
       value: set.volume_contribution,
-      formula: `log10(${set.volume}) = ${set.volume_contribution.toFixed(2)}`,
-      color: 'bg-wf-blue',
-      textColor: 'text-wf-blue',
+      formula: `log(${set.volume}) = ${set.volume_contribution.toFixed(2)}`,
+      color: 'bg-[#00f0ff]',
+      textColor: 'text-[#00f0ff]',
     },
     {
       label: 'ROI',
       value: set.profit_percentage,
       formula: `${set.profit_percentage.toFixed(1)}%`,
-      color: 'bg-wf-purple',
-      textColor: 'text-wf-purple',
+      color: 'bg-[#ffd700]',
+      textColor: 'text-[#ffd700]',
     },
     {
-      label: 'Trend',
+      label: 'Trend Vector',
       value: (set.trend_multiplier - 1) * 100,
       formula: `x${set.trend_multiplier.toFixed(2)}`,
-      color: set.trend_multiplier >= 1 ? 'bg-profit-positive' : 'bg-profit-negative',
-      textColor: set.trend_multiplier >= 1 ? 'text-profit-positive' : 'text-profit-negative',
+      color: set.trend_multiplier >= 1 ? 'bg-[#00ffaa]' : 'bg-[#ff3366]',
+      textColor: set.trend_multiplier >= 1 ? 'text-[#00ffaa]' : 'text-[#ff3366]',
     },
     {
-      label: 'Volatility',
+      label: 'Risk/Volatility',
       value: (set.volatility_penalty - 1) * -100,
       formula: `/${set.volatility_penalty.toFixed(2)}`,
-      color: 'bg-red-500',
-      textColor: 'text-red-400',
+      color: 'bg-[#ff7f50]',
+      textColor: 'text-[#ff7f50]',
     },
   ];
 
   return (
-    <div className="bg-dark-card rounded-lg p-4 space-y-4">
-      <h4 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
-        Golden Formula Breakdown
+    <div className="bg-black/40 border border-white/5 rounded-xl p-6 relative overflow-hidden group">
+      {/* Decorative background vectors */}
+      <div className="absolute -right-6 -bottom-6 w-32 h-32 bg-[radial-gradient(circle_at_center,rgba(0,240,255,0.1)_0%,transparent_70%)] rounded-full blur-xl pointer-events-none group-hover:scale-150 transition-transform duration-700" />
+
+      <h4 className="text-xs font-mono font-bold text-[#00f0ff] uppercase tracking-widest flex items-center gap-2 mb-6">
+        <span className="w-1.5 h-1.5 rounded-full bg-[#00f0ff] animate-pulse"></span>
+        Algorithm Telemetry
       </h4>
 
-      <div className="text-center py-3 bg-dark-hover rounded-lg">
-        <p className="text-xs text-gray-500 mb-1">
-          Score = (Profit x log(Volume)) x ROI x Trend / Volatility
+      <div className="text-center py-4 bg-white/5 border border-white/10 rounded-lg mb-6 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-[#00f0ff]/5 to-transparent -translate-x-full animate-[sweep_3s_ease-in-out_infinite]" />
+
+        <p className="text-[10px] text-gray-400 font-mono tracking-widest uppercase mb-2 px-2">
+          Score = (Profit × log(Vol)) × ROI × Trend ÷ Risk
         </p>
-        <p className="text-2xl font-bold text-mint">
+        <p className="text-4xl font-black terminal-text bg-clip-text text-transparent bg-gradient-to-r from-white via-[#8a2be2] to-[#00f0ff] drop-shadow-[0_0_10px_rgba(138,43,226,0.3)]">
           {set.composite_score.toFixed(3)}
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {contributions.map((contrib) => (
-          <div key={contrib.label} className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <div className={clsx('w-3 h-3 rounded-full', contrib.color)} />
-              <span className="text-sm text-gray-400">{contrib.label}</span>
+          <div key={contrib.label} className="flex items-center justify-between group/row">
+            <div className="flex items-center space-x-3">
+              <div className={cn('w-1 h-3 rounded-full shadow-[0_0_8px_currentColor]', contrib.color)} />
+              <span className="text-xs font-mono uppercase tracking-wide text-gray-400 group-hover/row:text-white transition-colors">{contrib.label}</span>
             </div>
-            <span className={clsx('text-sm font-mono', contrib.textColor)}>
+            <span className={cn('text-sm font-mono font-bold tracking-wider', contrib.textColor)}>
               {contrib.formula}
             </span>
           </div>
         ))}
       </div>
 
-      <div className="pt-2 border-t border-dark-border">
-        <div className="grid grid-cols-2 gap-2 text-xs">
-          <div>
-            <span className="text-gray-500">Trend Direction:</span>
+      <div className="mt-6 pt-4 border-t border-white/10">
+        <div className="grid grid-cols-2 gap-4 text-xs font-mono uppercase tracking-widest">
+          <div className="bg-white/5 p-3 rounded border border-white/5">
+            <span className="block text-gray-500 text-[10px] mb-1">Vector Bias</span>
             <span
-              className={clsx(
-                'ml-2 font-medium',
-                set.trend_direction === 'rising' && 'text-profit-positive',
-                set.trend_direction === 'falling' && 'text-profit-negative',
+              className={cn(
+                'font-bold',
+                set.trend_direction === 'rising' && 'text-[#00ffaa] drop-shadow-[0_0_5px_rgba(0,255,170,0.5)]',
+                set.trend_direction === 'falling' && 'text-[#ff3366] drop-shadow-[0_0_5px_rgba(255,51,102,0.5)]',
                 set.trend_direction === 'stable' && 'text-gray-400'
               )}
             >
-              {set.trend_direction.charAt(0).toUpperCase() + set.trend_direction.slice(1)}
+              {set.trend_direction}
             </span>
           </div>
-          <div>
-            <span className="text-gray-500">Risk Level:</span>
+          <div className="bg-white/5 p-3 rounded border border-white/5">
+            <span className="block text-gray-500 text-[10px] mb-1">Threat Level</span>
             <span
-              className={clsx(
-                'ml-2 font-medium',
-                set.risk_level === 'Low' && 'text-green-400',
-                set.risk_level === 'Medium' && 'text-yellow-400',
-                set.risk_level === 'High' && 'text-red-400'
+              className={cn(
+                'font-bold',
+                set.risk_level === 'Low' && 'text-[#00ffaa] drop-shadow-[0_0_5px_rgba(0,255,170,0.5)]',
+                set.risk_level === 'Medium' && 'text-[#ffd700] drop-shadow-[0_0_5px_rgba(255,215,0,0.5)]',
+                set.risk_level === 'High' && 'text-[#ff3366] drop-shadow-[0_0_5px_rgba(255,51,102,0.5)]'
               )}
             >
               {set.risk_level}

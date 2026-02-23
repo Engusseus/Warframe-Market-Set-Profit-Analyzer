@@ -153,29 +153,21 @@ class WarframeMarketService:
                         await asyncio.sleep(wait_time)
                     continue
 
-            except httpx.TimeoutException as e:
-                logger.warning(f"Timeout on {url}: {e}")
+            except httpx.HTTPStatusError as e:
+                logger.warning(f"HTTP Status Error on {url}: {e.response.status_code}")
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"All retries failed for {url} due to timeout")
+                    logger.error(f"All retries failed for {url} due to HTTP status error")
                     return None
-            except httpx.ConnectError as e:
-                logger.error(f"Connection error on {url}: {e}")
+            except httpx.RequestError as e:
+                logger.error(f"Request error on {url}: {e}")
                 if attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     await asyncio.sleep(wait_time)
                 else:
-                    logger.error(f"All retries failed for {url} due to connection error")
-                    return None
-            except Exception as e:
-                logger.error(f"Error fetching {url}: {type(e).__name__}: {e}")
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"All retries failed for {url}")
+                    logger.error(f"All retries failed for {url} due to request error")
                     return None
 
         logger.error(f"All retries exhausted for {url}")
@@ -230,14 +222,36 @@ class WarframeMarketService:
             raise Exception("Failed to fetch items from API")
 
         data = response.json()
-        items = data.get("data", [])
-        logger.debug(f"API returned {len(items)} total items")
+        items = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            logger.error("Invalid item list payload from Warframe Market API")
+            raise Exception("Invalid item list payload from API")
 
-        # Filter for items ending with 'prime_set'
-        prime_sets = [
-            item for item in items
-            if item.get('slug', '').endswith('_prime_set')
-        ]
+        from ..models.warframe_market import WFMItem
+
+        logger.debug(f"API returned {len(items)} total items")
+        prime_sets: List[Dict[str, Any]] = []
+        skipped_malformed_prime_sets = 0
+
+        for raw_item in items:
+            if not isinstance(raw_item, dict):
+                continue
+
+            slug = raw_item.get("slug")
+            if not isinstance(slug, str) or not slug.endswith("_prime_set"):
+                continue
+
+            try:
+                parsed_item = WFMItem.model_validate(raw_item)
+                prime_sets.append(parsed_item.model_dump(by_alias=True))
+            except Exception as e:
+                skipped_malformed_prime_sets += 1
+                logger.warning(f"Skipping malformed prime set item {slug!r}: {e}")
+
+        if skipped_malformed_prime_sets:
+            logger.warning(
+                f"Skipped {skipped_malformed_prime_sets} malformed prime set items from /items payload"
+            )
 
         if not prime_sets:
             logger.error("No Prime sets found in API response")
@@ -267,21 +281,18 @@ class WarframeMarketService:
 
         try:
             data = response.json()
-            item_data = data.get("data", {})
+            from ..models.warframe_market import WFMItemDetailResponse
+            parsed = WFMItemDetailResponse.model_validate(data)
+            item = parsed.data
 
             # Extract setParts and id
-            set_parts = item_data.get("setParts", [])
-            item_id = item_data.get("id", "")
-
             # Remove the original prime_set ID from setParts if it exists
-            filtered_set_parts = [part for part in set_parts if part != item_id]
+            filtered_set_parts = [part for part in (item.set_parts or []) if part != item.id]
 
             return {
-                "id": item_id,
+                "id": item.id,
                 "setParts": filtered_set_parts,
-                "name": item_data.get("i18n", {}).get("en", {}).get(
-                    "name", slug.replace('_', ' ').title()
-                )
+                "name": item.name
             }
         except Exception:
             return None
@@ -307,15 +318,13 @@ class WarframeMarketService:
 
         try:
             data = response.json()
-            item_data = data.get("data", {})
-            quantity_in_set = item_data.get("quantityInSet", 1)
-            part_name = item_data.get("i18n", {}).get("en", {}).get(
-                "name", part_code.replace('_', ' ').title()
-            )
+            from ..models.warframe_market import WFMItemDetailResponse
+            parsed = WFMItemDetailResponse.model_validate(data)
+            item = parsed.data
             return {
                 "code": part_code,
-                "name": part_name,
-                "quantityInSet": quantity_in_set
+                "name": item.name,
+                "quantityInSet": item.quantity_in_set
             }
         except Exception:
             return {
@@ -381,24 +390,14 @@ class WarframeMarketService:
 
         try:
             data = response.json()
-            if not isinstance(data, dict) or 'data' not in data:
-                return []
-
-            orders_data = data.get("data", {})
-            if not isinstance(orders_data, dict):
-                return []
-
-            sell_orders = orders_data.get("sell", [])
-            if not isinstance(sell_orders, list):
-                return []
+            from ..models.warframe_market import WFMOrdersResponse
+            parsed = WFMOrdersResponse.model_validate(data)
 
             # Extract and validate prices
             sell_prices = []
-            for order in sell_orders:
-                if isinstance(order, dict):
-                    platinum = order.get("platinum")
-                    if isinstance(platinum, (int, float)) and platinum > 0:
-                        sell_prices.append(platinum)
+            for order in parsed.data.sell:
+                if order.platinum > 0:
+                    sell_prices.append(order.platinum)
 
             return sell_prices
         except Exception:
@@ -407,7 +406,7 @@ class WarframeMarketService:
     async def fetch_set_lowest_prices(
         self,
         detailed_sets: List[Dict[str, Any]],
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[Callable] = None
     ) -> List[Dict[str, Any]]:
         """Fetch lowest prices for all Prime sets.
 
@@ -452,7 +451,7 @@ class WarframeMarketService:
     async def fetch_part_lowest_prices(
         self,
         detailed_sets: List[Dict[str, Any]],
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[Callable] = None
     ) -> List[Dict[str, Any]]:
         """Fetch lowest prices for all Prime parts.
 
@@ -506,7 +505,7 @@ class WarframeMarketService:
     async def fetch_set_volume(
         self,
         detailed_sets: List[Dict[str, Any]],
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """Fetch 48-hour volume for all Prime sets.
 
@@ -531,16 +530,15 @@ class WarframeMarketService:
 
             try:
                 data = response.json()
-                payload = data.get("payload", {})
-                statistics_closed = payload.get("statistics_closed", {})
-                hours_48_data = statistics_closed.get("48hours", [])
+                from ..models.warframe_market import WFMStatisticsResponse
+                parsed = WFMStatisticsResponse.model_validate(data)
+                
+                hours_48_data = parsed.payload.statistics_closed.hours48
 
                 set_volume = 0.0
                 for entry in hours_48_data:
-                    if isinstance(entry, dict):
-                        volume = entry.get("volume", 0)
-                        if isinstance(volume, (int, float)) and volume >= 0:
-                            set_volume += volume
+                    if entry.volume >= 0:
+                        set_volume += entry.volume
 
                 return (set_slug, set_volume)
             except Exception:
@@ -567,7 +565,7 @@ class WarframeMarketService:
     async def fetch_complete_set_data(
         self,
         prime_sets: List[Dict[str, Any]],
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[Callable] = None
     ) -> List[Dict[str, Any]]:
         """Fetch complete detailed information for all sets.
 

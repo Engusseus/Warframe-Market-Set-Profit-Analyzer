@@ -65,13 +65,13 @@ export function Export() {
               label="Total Runs"
               value={stats.database.total_runs}
               icon={<Database className="w-5 h-5" />}
-              color="mint"
+              color="cyan"
             />
             <StatCard
               label="Total Records"
               value={stats.database.total_profit_records.toLocaleString()}
               icon={<FileJson className="w-5 h-5" />}
-              color="blue"
+              color="cyan"
             />
             <StatCard
               label="Database Size"
@@ -114,7 +114,7 @@ export function Export() {
               <div className="mt-6 flex items-center space-x-4">
                 <Button
                   onClick={handleExport}
-                  loading={exporting}
+                  isLoading={exporting}
                   disabled={!hasData}
                   icon={exported ? <Check className="w-4 h-4" /> : <Download className="w-4 h-4" />}
                 >

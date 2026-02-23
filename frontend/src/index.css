@@ -2,177 +2,224 @@
 
 /* Custom theme configuration for Tailwind v4 */
 @theme {
-  /* Primary dark background colors */
-  --color-dark-bg: #080206;
-  --color-dark-card: #0d0810;
-  --color-dark-hover: #1a1520;
-  --color-dark-border: #2a2530;
+  /* Premium Void Black Background */
+  --color-dark-bg: #050507;
+  
+  /* Glassmorphic Cards & UI Elements */
+  --color-dark-card: rgba(13, 13, 18, 0.7);
+  --color-dark-hover: rgba(22, 22, 33, 0.8);
+  --color-dark-border: rgba(45, 45, 60, 0.5);
 
-  /* Accent colors from spec */
-  --color-mint: #9FBCAD;
-  --color-wf-blue: #7A9DB1;
-  --color-wf-purple: #9681AC;
+  /* Warframe Accents */
+  --color-neon-cyan: #00f0ff;
+  --color-orokin-gold: #ffd700;
+  --color-void-purple: #8a2be2;
+  --color-sentient-red: #ff3366;
+  /* Legacy aliases for screens still using old utility names */
+  --color-mint: var(--color-neon-cyan);
+  --color-wf-blue: #56b6ff;
+  --color-wf-purple: var(--color-void-purple);
 
   /* Status colors */
-  --color-profit-positive: #4ade80;
-  --color-profit-negative: #f87171;
+  --color-profit-positive: #00ffaa;
+  --color-profit-negative: #ff3366;
 
   /* Custom animations */
-  --animate-pulse-slow: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  --animate-glow: glow 2s ease-in-out infinite alternate;
-  --animate-fade-in: fadeIn 0.3s ease-in-out;
-  --animate-slide-up: slideUp 0.3s ease-out;
+  --animate-pulse-glow: pulse-glow 3s ease-in-out infinite;
+  --animate-float: float 6s ease-in-out infinite;
+  --animate-data-stream: data-stream 20s linear infinite;
+  --animate-scrolling-bg: scrolling-bg 60s linear infinite;
 }
 
-@keyframes glow {
-  0% { box-shadow: 0 0 5px #9FBCAD, 0 0 10px #9FBCAD; }
-  100% { box-shadow: 0 0 10px #9FBCAD, 0 0 20px #9FBCAD; }
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 10px rgba(0, 240, 255, 0.2), inset 0 0 5px rgba(0, 240, 255, 0.1); }
+  50% { box-shadow: 0 0 20px rgba(0, 240, 255, 0.4), inset 0 0 10px rgba(0, 240, 255, 0.2); }
 }
 
-@keyframes fadeIn {
-  0% { opacity: 0; }
-  100% { opacity: 1; }
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
 }
 
-@keyframes slideUp {
-  0% { transform: translateY(10px); opacity: 0; }
-  100% { transform: translateY(0); opacity: 1; }
+@keyframes data-stream {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 200% 0%; }
 }
 
-@keyframes progress-stripes {
-  0% { background-position: 0 0; }
-  100% { background-position: 40px 0; }
-}
-
-@keyframes progress-glow {
-  0%, 100% { box-shadow: 0 0 5px rgba(159, 188, 173, 0.3); }
-  50% { box-shadow: 0 0 15px rgba(159, 188, 173, 0.6); }
+@keyframes scrolling-bg {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-50%); }
 }
 
 /* Base styles */
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
   min-height: 100vh;
   background-color: var(--color-dark-bg);
-  color: #f0f0f0;
+  color: #e2e8f0;
+  overflow-x: hidden;
+  /* Very subtle animated mesh background effect */
+  background-image: 
+    radial-gradient(circle at 15% 50%, rgba(0, 240, 255, 0.03) 0%, transparent 50%),
+    radial-gradient(circle at 85% 30%, rgba(138, 43, 226, 0.03) 0%, transparent 50%);
+  background-attachment: fixed;
 }
 
 #root {
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling - Sleek & Thin */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-dark-card);
+  background: var(--color-dark-bg);
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-dark-border);
-  border-radius: 4px;
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-wf-purple);
+  background: var(--color-neon-cyan);
+}
+
+/* Selection */
+::selection {
+  background: rgba(0, 240, 255, 0.3);
+  color: #fff;
 }
 
 /* Custom utility classes */
+@utility glass-panel {
+  background-color: var(--color-dark-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-dark-border);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+}
+
+@utility glass-panel-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  &:hover {
+    background-color: var(--color-dark-hover);
+    border-color: rgba(0, 240, 255, 0.3);
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+    transform: translateY(-2px);
+  }
+}
+
+@utility terminal-text {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.05em;
+}
+
+@utility gradient-text-cyan {
+  background: linear-gradient(135deg, #fff 0%, var(--color-neon-cyan) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility gradient-text-gold {
+  background: linear-gradient(135deg, #fff 0%, var(--color-orokin-gold) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Compatibility utilities for non-migrated routes/components */
+@utility gradient-text {
+  background: linear-gradient(120deg, var(--color-mint), var(--color-wf-blue), var(--color-wf-purple));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
 @utility card {
   background-color: var(--color-dark-card);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--color-dark-border);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   padding: 1rem;
-  transition: all 0.2s;
 }
 
 @utility card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   &:hover {
-    border-color: color-mix(in srgb, var(--color-mint) 50%, transparent);
-    box-shadow: 0 10px 15px -3px color-mix(in srgb, var(--color-mint) 10%, transparent);
+    background-color: var(--color-dark-hover);
+    border-color: rgba(0, 240, 255, 0.3);
+    box-shadow: 0 0 20px rgba(0, 240, 255, 0.1);
+    transform: translateY(-2px);
   }
 }
 
-@utility btn-primary {
-  padding: 0.5rem 1rem;
-  background-color: var(--color-mint);
-  color: var(--color-dark-bg);
-  font-weight: 500;
-  border-radius: 0.5rem;
-  transition: background-color 0.2s;
-
-  &:hover {
-    background-color: color-mix(in srgb, var(--color-mint) 90%, transparent);
-  }
-
-  &:active {
-    background-color: color-mix(in srgb, var(--color-mint) 80%, transparent);
-  }
-
-  &:focus {
-    outline: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mint) 50%, transparent);
-  }
-}
-
-@utility btn-secondary {
-  padding: 0.5rem 1rem;
-  background-color: var(--color-dark-hover);
+/* Input styling overrides */
+@utility input-premium {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background-color: rgba(10, 10, 15, 0.6);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--color-dark-border);
-  color: #f3f4f6;
-  font-weight: 500;
   border-radius: 0.5rem;
-  transition: all 0.2s;
+  color: #fff;
+  transition: all 0.2s ease;
+  font-family: inherit;
 
-  &:hover {
-    background-color: var(--color-dark-border);
-    border-color: color-mix(in srgb, var(--color-mint) 30%, transparent);
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.3);
   }
 
   &:focus {
     outline: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-mint) 30%, transparent);
+    border-color: var(--color-neon-cyan);
+    box-shadow: 0 0 0 1px var(--color-neon-cyan), 0 0 15px rgba(0, 240, 255, 0.2);
+    background-color: rgba(15, 15, 22, 0.8);
   }
 }
 
 @utility input {
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  background-color: var(--color-dark-card);
+  padding: 0.75rem 1rem;
+  background-color: rgba(10, 10, 15, 0.6);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--color-dark-border);
   border-radius: 0.5rem;
-  color: #f3f4f6;
-  transition: all 0.2s;
+  color: #fff;
+  transition: all 0.2s ease;
+  font-family: inherit;
 
   &::placeholder {
-    color: #6b7280;
+    color: rgba(255, 255, 255, 0.3);
   }
 
   &:focus {
     outline: none;
-    border-color: color-mix(in srgb, var(--color-mint) 50%, transparent);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-mint) 30%, transparent);
+    border-color: var(--color-neon-cyan);
+    box-shadow: 0 0 0 1px var(--color-neon-cyan), 0 0 15px rgba(0, 240, 255, 0.2);
+    background-color: rgba(15, 15, 22, 0.8);
   }
 }
 
-@utility profit-positive {
+/* Profit Utility Classes */
+@utility text-profit-positive {
   color: var(--color-profit-positive);
+  text-shadow: 0 0 10px rgba(0, 255, 170, 0.4);
 }
 
-@utility profit-negative {
+@utility text-profit-negative {
   color: var(--color-profit-negative);
-}
-
-@utility gradient-text {
-  background: linear-gradient(to right, var(--color-mint), var(--color-wf-blue), var(--color-wf-purple));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  text-shadow: 0 0 10px rgba(255, 51, 102, 0.4);
 }
