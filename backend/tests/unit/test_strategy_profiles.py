@@ -207,6 +207,53 @@ class TestApplyStrategyWeights:
         # Aggressive should benefit more from high ROI
         assert aggressive_score > safe_score
 
+    @pytest.mark.unit
+    def test_negative_base_negative_roi_increases_magnitude(self):
+        """Test sign-preserving ROI behavior for negative base scores."""
+        base_score = -100.0
+
+        score_without_roi = apply_strategy_weights(
+            base_score=base_score,
+            volatility_penalty=1.0,
+            trend_multiplier=1.0,
+            roi=0.0,
+            strategy=StrategyType.BALANCED,
+        )
+        score_with_negative_roi = apply_strategy_weights(
+            base_score=base_score,
+            volatility_penalty=1.0,
+            trend_multiplier=1.0,
+            roi=-50.0,
+            strategy=StrategyType.BALANCED,
+        )
+
+        assert score_with_negative_roi < score_without_roi
+        assert abs(score_with_negative_roi) > abs(score_without_roi)
+        assert score_with_negative_roi == pytest.approx(-150.0)
+
+    @pytest.mark.unit
+    def test_negative_base_positive_roi_decreases_magnitude(self):
+        """Test that opposing ROI direction dampens negative base score."""
+        base_score = -100.0
+
+        score_without_roi = apply_strategy_weights(
+            base_score=base_score,
+            volatility_penalty=1.0,
+            trend_multiplier=1.0,
+            roi=0.0,
+            strategy=StrategyType.BALANCED,
+        )
+        score_with_positive_roi = apply_strategy_weights(
+            base_score=base_score,
+            volatility_penalty=1.0,
+            trend_multiplier=1.0,
+            roi=50.0,
+            strategy=StrategyType.BALANCED,
+        )
+
+        assert abs(score_with_positive_roi) < abs(score_without_roi)
+        assert score_with_positive_roi == pytest.approx(-50.0)
+
 
 class TestGetAllStrategies:
     """Tests for get_all_strategies function."""

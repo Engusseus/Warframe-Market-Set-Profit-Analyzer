@@ -5,6 +5,7 @@ backend/venv/
 # Claude Code configuration
 .claude/
 CLAUDE.md
+AGENTS.md
 INITIAL.md
 
 # BMAD framework
@@ -86,6 +87,13 @@ backend/cache/*.cache
 
 # Database files (personal analysis data)
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
 
 # OS generated files
 .DS_Store

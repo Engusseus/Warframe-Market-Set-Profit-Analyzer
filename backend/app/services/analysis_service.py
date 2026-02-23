@@ -22,6 +22,7 @@ from ..core.strategy_profiles import StrategyType, get_all_strategies
 from ..db.database import AsyncMarketDatabase
 from ..models.schemas import (
     AnalysisResponse,
+    ExecutionMode,
     ScoredData,
     StrategyType as SchemaStrategyType,
     WeightsConfig,
@@ -64,6 +65,7 @@ class AnalysisService:
         self._current_data: Optional[List[Dict[str, Any]]] = None
         self._current_weights: Optional[Tuple[float, float]] = None
         self._current_strategy: StrategyType = StrategyType.BALANCED
+        self._current_execution_mode: ExecutionMode = ExecutionMode.INSTANT
 
     async def get_database(self) -> AsyncMarketDatabase:
         """Get or create database instance."""
@@ -85,6 +87,7 @@ class AnalysisService:
     async def run_full_analysis(
         self,
         strategy: StrategyType = StrategyType.BALANCED,
+        execution_mode: ExecutionMode = ExecutionMode.INSTANT,
         force_refresh: bool = False,
         test_mode: bool = False,
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
@@ -96,6 +99,7 @@ class AnalysisService:
 
         Args:
             strategy: Trading strategy to use for scoring
+            execution_mode: Whether to score instant or patient execution assumptions
             force_refresh: Force fresh data fetch even if cache is valid
             test_mode: If True, only fetch a small subset of data for testing
             progress_callback: Optional callback for progress updates
@@ -108,7 +112,13 @@ class AnalysisService:
         logger = get_logger()
         logger.info("=" * 50)
         logger.info("Starting full analysis")
-        logger.info(f"Parameters: strategy={strategy.value}, force_refresh={force_refresh}, test_mode={test_mode}")
+        logger.info(
+            "Parameters: strategy=%s, execution_mode=%s, force_refresh=%s, test_mode=%s",
+            strategy.value,
+            execution_mode.value,
+            force_refresh,
+            test_mode,
+        )
         self._update_status("running", 0, "Starting analysis...")
 
         try:
@@ -272,7 +282,8 @@ class AnalysisService:
                 profit_data,
                 volume_data,
                 trend_volatility_metrics,
-                strategy
+                strategy=strategy,
+                execution_mode=execution_mode
             )
 
             # Convert to dict format for storage and rescoring
@@ -283,6 +294,7 @@ class AnalysisService:
             self._current_data = scored_data
             self._current_weights = (1.0, 1.2)  # Legacy
             self._current_strategy = strategy
+            self._current_execution_mode = execution_mode
 
             # Step 9: Save to database
             logger.info("Step 9: Saving to database...")
@@ -326,6 +338,7 @@ class AnalysisService:
                     volume_weight=1.2
                 ),
                 strategy=SchemaStrategyType(strategy.value),
+                execution_mode=execution_mode,
                 cached=cache_valid
             )
 
@@ -379,6 +392,7 @@ class AnalysisService:
                 total_sets=len(scored_sets),
                 profitable_sets=len([s for s in scored_sets if s.profit_margin > 0]),
                 weights=WeightsConfig(),
+                execution_mode=ExecutionMode.INSTANT,
                 cached=True
             )
         except Exception:
@@ -387,6 +401,7 @@ class AnalysisService:
     async def recalculate_scores(
         self,
         strategy: StrategyType = StrategyType.BALANCED,
+        execution_mode: Optional[ExecutionMode] = None,
         # Legacy parameters
         profit_weight: float = 1.0,
         volume_weight: float = 1.2
@@ -395,6 +410,7 @@ class AnalysisService:
 
         Args:
             strategy: New strategy to apply
+            execution_mode: Optional execution mode override
             profit_weight: Legacy parameter (ignored)
             volume_weight: Legacy parameter (ignored)
 
@@ -404,13 +420,17 @@ class AnalysisService:
         if self._current_data is None:
             return None
 
+        selected_mode = execution_mode or self._current_execution_mode
+
         rescored = recalculate_scores_with_strategy(
             self._current_data,
-            strategy
+            strategy,
+            execution_mode=selected_mode
         )
 
         self._current_data = rescored
         self._current_strategy = strategy
+        self._current_execution_mode = selected_mode
 
         return rescored
 

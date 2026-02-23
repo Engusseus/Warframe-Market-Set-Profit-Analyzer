@@ -29,7 +29,19 @@ class TrendDirection(str, Enum):
     STABLE = "stable"
 
 
+class ExecutionMode(str, Enum):
+    """Execution assumptions for profit and scoring calculations."""
+    INSTANT = "instant"
+    PATIENT = "patient"
+
+
 # === Part and Set Data Models ===
+
+class OrderbookLevel(BaseModel):
+    """Price level from market orderbook."""
+    platinum: float
+    quantity: int = 1
+
 
 class PartDetail(BaseModel):
     """Individual part information within a set."""
@@ -38,6 +50,14 @@ class PartDetail(BaseModel):
     unit_price: float
     quantity: int
     total_cost: float
+    lowest_price: Optional[float] = None
+    highest_bid: Optional[float] = None
+    top_sell_orders: List[OrderbookLevel] = Field(default_factory=list)
+    top_buy_orders: List[OrderbookLevel] = Field(default_factory=list)
+    instant_unit_price: Optional[float] = None
+    patient_unit_price: Optional[float] = None
+    instant_total_cost: Optional[float] = None
+    patient_total_cost: Optional[float] = None
 
 
 class PartQuantity(BaseModel):
@@ -55,9 +75,12 @@ class SetPriceData(BaseModel):
     slug: str
     name: str
     lowest_price: float
+    highest_bid: float = 0.0
     price_count: int
     min_price: float
     max_price: float
+    top_sell_orders: List[OrderbookLevel] = Field(default_factory=list)
+    top_buy_orders: List[OrderbookLevel] = Field(default_factory=list)
     id: Optional[str] = None
 
 
@@ -66,9 +89,12 @@ class PartPriceData(BaseModel):
     slug: str
     name: str
     lowest_price: float
+    highest_bid: float = 0.0
     price_count: int
     min_price: float
     max_price: float
+    top_sell_orders: List[OrderbookLevel] = Field(default_factory=list)
+    top_buy_orders: List[OrderbookLevel] = Field(default_factory=list)
     quantity_in_set: int = 1
 
 
@@ -93,11 +119,20 @@ class ProfitData(BaseModel):
     part_cost: float
     profit_margin: float
     profit_percentage: float
+    instant_set_price: Optional[float] = None
+    instant_part_cost: Optional[float] = None
+    instant_profit_margin: Optional[float] = None
+    instant_profit_percentage: Optional[float] = None
+    patient_set_price: Optional[float] = None
+    patient_part_cost: Optional[float] = None
+    patient_profit_margin: Optional[float] = None
+    patient_profit_percentage: Optional[float] = None
     part_details: List[PartDetail]
 
 
 class ScoredData(ProfitData):
     """Scored profit data with normalized values and trend/volatility metrics."""
+    execution_mode: ExecutionMode = ExecutionMode.INSTANT
     volume: int = 0
     normalized_profit: float = 0.0
     normalized_volume: float = 0.0
@@ -119,6 +154,11 @@ class ScoredData(ProfitData):
     volume_contribution: float = 0.0
     trend_contribution: float = 1.0
     volatility_contribution: float = 1.0
+    # Liquidity velocity fields
+    bid_ask_ratio: float = 0.0
+    sell_side_competition: float = 0.0
+    liquidity_velocity: float = 0.0
+    liquidity_multiplier: float = 1.0
 
 
 # === API Request/Response Models ===
@@ -126,6 +166,7 @@ class ScoredData(ProfitData):
 class AnalysisConfig(BaseModel):
     """Configuration for running analysis."""
     strategy: StrategyType = StrategyType.BALANCED
+    execution_mode: ExecutionMode = ExecutionMode.INSTANT
     force_refresh: bool = False
     # Legacy fields for backward compatibility
     profit_weight: float = Field(default=1.0, ge=0.0, le=10.0)
@@ -160,6 +201,7 @@ class AnalysisResponse(BaseModel):
     profitable_sets: int
     weights: WeightsConfig
     strategy: StrategyType = StrategyType.BALANCED
+    execution_mode: ExecutionMode = ExecutionMode.INSTANT
     cached: bool = False
 
 

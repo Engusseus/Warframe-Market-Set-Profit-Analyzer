@@ -12,10 +12,10 @@ class TestCalculateProfitMargins:
     """Tests for calculate_profit_margins function."""
 
     @pytest.mark.unit
-    def test_calculates_profit_margin_correctly(
+    def test_calculates_instant_profit_margin_correctly(
         self, sample_set_prices, sample_part_prices, sample_detailed_sets
     ):
-        """Test that profit margin is calculated correctly."""
+        """Canonical margin should use instant execution metrics."""
         result = calculate_profit_margins(
             set_prices=sample_set_prices,
             part_prices=sample_part_prices,
@@ -26,17 +26,17 @@ class TestCalculateProfitMargins:
         saryn = next((r for r in result if r.set_slug == "saryn_prime_set"), None)
         assert saryn is not None
 
-        # Set price: 150, Part costs: 4 * 25 = 100
-        # Profit margin: 150 - 100 = 50
-        assert saryn.profit_margin == 50.0
-        assert saryn.set_price == 150.0
-        assert saryn.part_cost == 100.0
+        # Instant revenue uses top bid: 130.
+        # Instant part cost uses top asks: 4 * 25 = 100.
+        assert saryn.profit_margin == pytest.approx(30.0)
+        assert saryn.set_price == pytest.approx(130.0)
+        assert saryn.part_cost == pytest.approx(100.0)
 
     @pytest.mark.unit
-    def test_calculates_profit_percentage_correctly(
+    def test_calculates_instant_profit_percentage_correctly(
         self, sample_set_prices, sample_part_prices, sample_detailed_sets
     ):
-        """Test that profit percentage (ROI) is calculated correctly."""
+        """Canonical ROI should use instant execution metrics."""
         result = calculate_profit_margins(
             set_prices=sample_set_prices,
             part_prices=sample_part_prices,
@@ -46,9 +46,32 @@ class TestCalculateProfitMargins:
         saryn = next((r for r in result if r.set_slug == "saryn_prime_set"), None)
         assert saryn is not None
 
-        # Profit margin: 50, Part cost: 100
-        # Profit percentage: (50 / 100) * 100 = 50%
-        assert saryn.profit_percentage == 50.0
+        # Instant ROI: (130 - 100) / 100 * 100
+        assert saryn.profit_percentage == pytest.approx(30.0)
+
+    @pytest.mark.unit
+    def test_populates_instant_and_patient_metrics(
+        self, sample_set_prices, sample_part_prices, sample_detailed_sets
+    ):
+        """Instant and patient metrics should both be present and coherent."""
+        result = calculate_profit_margins(
+            set_prices=sample_set_prices,
+            part_prices=sample_part_prices,
+            detailed_sets=sample_detailed_sets,
+        )
+
+        saryn = next((r for r in result if r.set_slug == "saryn_prime_set"), None)
+        assert saryn is not None
+
+        assert saryn.instant_set_price == pytest.approx(130.0)
+        assert saryn.instant_part_cost == pytest.approx(100.0)
+        assert saryn.instant_profit_margin == pytest.approx(30.0)
+        assert saryn.instant_profit_percentage == pytest.approx(30.0)
+
+        assert saryn.patient_set_price == pytest.approx(150.0)
+        assert saryn.patient_part_cost == pytest.approx(80.0)
+        assert saryn.patient_profit_margin == pytest.approx(70.0)
+        assert saryn.patient_profit_percentage == pytest.approx(87.5)
 
     @pytest.mark.unit
     def test_returns_profit_data_objects(
@@ -81,16 +104,40 @@ class TestCalculateProfitMargins:
 
         for part in saryn.part_details:
             assert isinstance(part, PartDetail)
-            assert part.unit_price == 25.0
+            assert part.unit_price == pytest.approx(25.0)
             assert part.quantity == 1
-            assert part.total_cost == 25.0
+            assert part.total_cost == pytest.approx(25.0)
+            assert part.highest_bid == pytest.approx(20.0)
+            assert len(part.top_sell_orders) > 0
+            assert len(part.top_buy_orders) > 0
+            assert part.instant_unit_price == pytest.approx(25.0)
+            assert part.patient_unit_price == pytest.approx(20.0)
 
     @pytest.mark.unit
-    def test_handles_quantity_in_set(self):
-        """Test that quantity_in_set is properly multiplied."""
-        set_prices = [{"slug": "test_set", "lowest_price": 100.0}]
+    def test_handles_quantity_in_set_with_depth_vwap(self):
+        """Required quantity should consume multiple orderbook levels."""
+        set_prices = [{
+            "slug": "test_set",
+            "lowest_price": 110.0,
+            "highest_bid": 100.0,
+            "top_sell_orders": [{"platinum": 110.0, "quantity": 2}],
+            "top_buy_orders": [{"platinum": 100.0, "quantity": 1}],
+        }]
         part_prices = [
-            {"slug": "test_part", "lowest_price": 10.0, "quantity_in_set": 3},
+            {
+                "slug": "test_part",
+                "lowest_price": 10.0,
+                "highest_bid": 8.0,
+                "quantity_in_set": 3,
+                "top_sell_orders": [
+                    {"platinum": 10.0, "quantity": 1},
+                    {"platinum": 12.0, "quantity": 2},
+                ],
+                "top_buy_orders": [
+                    {"platinum": 8.0, "quantity": 2},
+                    {"platinum": 7.0, "quantity": 3},
+                ],
+            },
         ]
         detailed_sets = [{
             "id": "test_set",
@@ -104,10 +151,47 @@ class TestCalculateProfitMargins:
         result = calculate_profit_margins(set_prices, part_prices, detailed_sets)
 
         assert len(result) == 1
-        # Part cost: 10 * 3 = 30
-        # Profit margin: 100 - 30 = 70
-        assert result[0].part_cost == 30.0
-        assert result[0].profit_margin == 70.0
+        # Instant part cost: 1x10 + 2x12 = 34
+        # Instant set revenue: 1x100
+        assert result[0].part_cost == pytest.approx(34.0)
+        assert result[0].profit_margin == pytest.approx(66.0)
+
+        # Patient part cost: 2x8 + 1x7 = 23
+        # Patient set revenue: 1x110
+        assert result[0].patient_part_cost == pytest.approx(23.0)
+        assert result[0].patient_profit_margin == pytest.approx(87.0)
+
+    @pytest.mark.unit
+    def test_falls_back_when_orderbook_missing(self):
+        """Missing orderbook levels should fallback to lowest_price/highest_bid."""
+        set_prices = [{"slug": "test_set", "lowest_price": 120.0, "highest_bid": 95.0}]
+        part_prices = [{
+            "slug": "test_part",
+            "lowest_price": 30.0,
+            "highest_bid": 20.0,
+            "quantity_in_set": 2,
+        }]
+        detailed_sets = [{
+            "id": "test_set",
+            "slug": "test_set",
+            "name": "Test Set",
+            "setParts": [
+                {"code": "test_part", "name": "Test Part", "quantityInSet": 2},
+            ],
+        }]
+
+        result = calculate_profit_margins(set_prices, part_prices, detailed_sets)
+        assert len(result) == 1
+
+        # Instant: sell set to bid (95), buy parts at ask (30*2)
+        assert result[0].set_price == pytest.approx(95.0)
+        assert result[0].part_cost == pytest.approx(60.0)
+        assert result[0].profit_margin == pytest.approx(35.0)
+
+        # Patient: sell set at ask (120), buy parts at bid (20*2)
+        assert result[0].patient_set_price == pytest.approx(120.0)
+        assert result[0].patient_part_cost == pytest.approx(40.0)
+        assert result[0].patient_profit_margin == pytest.approx(80.0)
 
     @pytest.mark.unit
     def test_skips_sets_with_missing_parts(self):
@@ -155,9 +239,9 @@ class TestCalculateProfitMargins:
     @pytest.mark.unit
     def test_handles_negative_profit(self):
         """Test that negative profit margins are calculated correctly."""
-        set_prices = [{"slug": "losing_set", "lowest_price": 50.0}]
+        set_prices = [{"slug": "losing_set", "lowest_price": 55.0, "highest_bid": 50.0}]
         part_prices = [
-            {"slug": "expensive_part", "lowest_price": 30.0, "quantity_in_set": 2},
+            {"slug": "expensive_part", "lowest_price": 30.0, "highest_bid": 28.0, "quantity_in_set": 2},
         ]
         detailed_sets = [{
             "id": "losing_set",
@@ -172,8 +256,8 @@ class TestCalculateProfitMargins:
 
         assert len(result) == 1
         # Part cost: 30 * 2 = 60
-        # Profit margin: 50 - 60 = -10
-        assert result[0].profit_margin == -10.0
+        # Instant revenue: highest bid 50 -> margin = -10
+        assert result[0].profit_margin == pytest.approx(-10.0)
         assert result[0].profit_percentage < 0
 
 
@@ -195,6 +279,8 @@ class TestCalculateProfitMarginsDict:
             assert isinstance(item, dict)
             assert 'set_slug' in item
             assert 'profit_margin' in item
+            assert 'instant_profit_margin' in item
+            assert 'patient_profit_margin' in item
             assert 'part_details' in item
 
     @pytest.mark.unit
@@ -219,3 +305,5 @@ class TestCalculateProfitMarginsDict:
             assert pyd.set_slug == dct['set_slug']
             assert pyd.profit_margin == dct['profit_margin']
             assert pyd.profit_percentage == dct['profit_percentage']
+            assert pyd.instant_profit_margin == dct['instant_profit_margin']
+            assert pyd.patient_profit_margin == dct['patient_profit_margin']

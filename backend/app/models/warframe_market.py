@@ -30,6 +30,7 @@ class WFMOrder(BaseModel):
     platinum: float
     order_type: str
     user: Dict[str, Any]
+    quantity: Optional[float] = 1
     
 class WFMOrdersData(BaseModel):
     sell: List[WFMOrder]
