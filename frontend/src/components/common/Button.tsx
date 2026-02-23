@@ -1,56 +1,105 @@
-import type { ReactNode, ButtonHTMLAttributes } from 'react';
-import { Loader2 } from 'lucide-react';
-import clsx from 'clsx';
+import React from 'react';
+import { motion } from 'framer-motion';
+import type { HTMLMotionProps } from 'framer-motion';
+import { cn } from './SpotlightCard';
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  children: ReactNode;
-  variant?: 'primary' | 'secondary' | 'ghost';
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   size?: 'sm' | 'md' | 'lg';
+  icon?: React.ReactNode;
+  isLoading?: boolean;
   loading?: boolean;
-  icon?: ReactNode;
 }
 
-export function Button({
-  children,
-  variant = 'primary',
-  size = 'md',
-  loading = false,
-  icon,
-  className,
-  disabled,
-  ...props
-}: ButtonProps) {
-  const baseClasses = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 disabled:opacity-50 disabled:cursor-not-allowed';
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  (
+    {
+      children,
+      variant = 'primary',
+      size = 'md',
+      className,
+      icon,
+      isLoading,
+      loading,
+      disabled,
+      ...props
+    },
+    ref
+  ) => {
+    const baseStyles =
+      'relative inline-flex items-center justify-center font-medium rounded-lg transition-all duration-300 overflow-hidden';
 
-  const variantClasses = {
-    primary: 'bg-mint text-dark-bg hover:bg-mint/90 active:bg-mint/80 focus:ring-mint/50',
-    secondary: 'bg-dark-hover border border-dark-border text-gray-100 hover:bg-dark-border hover:border-mint/30 focus:ring-mint/30',
-    ghost: 'text-gray-300 hover:text-mint hover:bg-dark-hover focus:ring-mint/20',
-  };
+    const variants = {
+      primary:
+        'bg-[#00f0ff]/10 text-[#00f0ff] border border-[#00f0ff]/50 hover:bg-[#00f0ff]/20 hover:shadow-[0_0_15px_rgba(0,240,255,0.4)]',
+      secondary:
+        'bg-[#ffd700]/10 text-[#ffd700] border border-[#ffd700]/50 hover:bg-[#ffd700]/20 hover:shadow-[0_0_15px_rgba(255,215,0,0.4)]',
+      ghost:
+        'bg-transparent text-gray-300 hover:text-white hover:bg-white/5 border border-transparent',
+      danger:
+        'bg-[#ff3366]/10 text-[#ff3366] border border-[#ff3366]/50 hover:bg-[#ff3366]/20 hover:shadow-[0_0_15px_rgba(255,51,102,0.4)]',
+    };
 
-  const sizeClasses = {
-    sm: 'px-3 py-1.5 text-sm gap-1.5',
-    md: 'px-4 py-2 text-base gap-2',
-    lg: 'px-6 py-3 text-lg gap-2.5',
-  };
+    const sizes = {
+      sm: 'text-sm px-3 py-1.5 gap-1.5',
+      md: 'text-sm px-4 py-2 gap-2',
+      lg: 'text-base px-6 py-3 gap-2',
+    };
 
-  return (
-    <button
-      className={clsx(
-        baseClasses,
-        variantClasses[variant],
-        sizeClasses[size],
-        className
-      )}
-      disabled={disabled || loading}
-      {...props}
-    >
-      {loading ? (
-        <Loader2 className="w-4 h-4 animate-spin" />
-      ) : icon ? (
-        icon
-      ) : null}
-      {children}
-    </button>
-  );
+    const isButtonLoading = isLoading ?? loading ?? false;
+    const isDisabled = disabled || isButtonLoading;
+
+    return (
+      <motion.button
+        ref={ref}
+        whileHover={!isDisabled ? { scale: 1.02 } : {}}
+        whileTap={!isDisabled ? { scale: 0.98 } : {}}
+        className={cn(
+          baseStyles,
+          variants[variant],
+          sizes[size],
+          isDisabled && 'opacity-50 cursor-not-allowed hover:shadow-none hover:bg-transparent',
+          className
+        )}
+        disabled={isDisabled}
+        {...props as HTMLMotionProps<"button">}
+      >
+        {/* Glow sweep effect */}
+        {!isDisabled && (
+          <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-lg">
+            <div className="absolute top-0 -left-[100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[45deg] animate-[sweep_3s_ease-in-out_infinite]" />
+          </div>
+        )}
+
+        <div className="relative z-10 flex items-center gap-2">
+          {isButtonLoading ? (
+            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          ) : (
+            icon
+          )}
+          {children}
+        </div>
+      </motion.button>
+    );
+  }
+);
+
+Button.displayName = 'Button';
+
+const BUTTON_SWEEP_STYLE_ID = 'wfm-button-sweep-keyframes';
+
+// Add the sweep animation once if not provided by Tailwind plugins.
+if (typeof document !== 'undefined' && !document.getElementById(BUTTON_SWEEP_STYLE_ID)) {
+  const style = document.createElement('style');
+  style.id = BUTTON_SWEEP_STYLE_ID;
+  style.textContent = `
+    @keyframes sweep {
+      0% { transform: translateX(-100%); }
+      50%, 100% { transform: translateX(300%); }
+    }
+  `;
+  document.head.appendChild(style);
 }

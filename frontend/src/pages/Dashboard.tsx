@@ -1,13 +1,36 @@
 import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, Database, Clock, TrendingUp, Play, Loader2, ArrowRight } from 'lucide-react';
+import { Database, Clock, TrendingUp, Play, Loader2, ArrowRight, BarChart2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
+import type { Variants } from 'framer-motion';
 import { runAnalysis, getStats } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
 import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
 import { Layout } from '../components/layout/Layout';
 import { StatCard, Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
+import { SpotlightCard } from '../components/common/SpotlightCard';
+
+const containerVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.1,
+      delayChildren: 0.1,
+    }
+  }
+};
+
+const itemVariants: Variants = {
+  hidden: { y: 20, opacity: 0 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    transition: { type: 'spring', stiffness: 100, damping: 12 }
+  }
+};
 
 export function Dashboard() {
   const {
@@ -24,8 +47,6 @@ export function Dashboard() {
   } = useAnalysisStore();
 
   const [testMode, setTestMode] = useState(false);
-
-  // Track "waiting for SSE connection" state
   const [isInitiating, setIsInitiating] = useState(false);
 
   const { data: stats } = useQuery({
@@ -34,202 +55,235 @@ export function Dashboard() {
     staleTime: 60000,
   });
 
-  // Handle progress updates from SSE
   const handleProgress = useCallback((update: { progress: number | null; message: string | null }) => {
     setProgress(update.progress, update.message);
   }, [setProgress]);
 
-  // Execute the actual analysis API call (called after SSE connects)
   const executeAnalysis = useCallback(async () => {
-    console.log('[Dashboard] Starting analysis execution...');
     setIsInitiating(false);
-    setProgress(0, 'Starting analysis...');
+    setProgress(0, 'Initialize System Uplink...');
 
     try {
       const result = await runAnalysis(strategy, false, testMode);
       setAnalysis(result);
     } catch (err) {
-      console.error('[Dashboard] Analysis failed', err);
-      setError(err instanceof Error ? err.message : 'Analysis failed');
+      setError(err instanceof Error ? err.message : 'Uplink failed');
     } finally {
       setLoading(false);
     }
   }, [strategy, setAnalysis, setError, setLoading, setProgress, testMode]);
 
   const handleConnected = useCallback(() => {
-    console.log('[Dashboard] SSE Connected. isInitiating:', isInitiating);
-    // Only trigger API once connected AND we are in the initiating phase
     if (isInitiating) {
       executeAnalysis();
     }
   }, [isInitiating, executeAnalysis]);
 
   const handleError = useCallback((err: string) => {
-    console.error('[Dashboard] SSE Error:', err);
-    // If we get an SSE error during initiation, we should probably stop or show error
-    // But for now just log it.
+    console.error('[Terminal] Uplink Error:', err);
   }, []);
 
-  // Subscribe to progress updates when analysis is running or initiating
   useAnalysisProgress(isLoading || isInitiating, {
     onProgress: handleProgress,
     onConnected: handleConnected,
     onError: handleError
   });
 
-  // Button handler - starts the connection process, API call triggered by onConnected
   const handleRunAnalysis = () => {
     setError(null);
     setLoading(true);
-    setProgress(0, 'Connecting...');
+    setProgress(0, 'Establishing Secure Connection...');
     setIsInitiating(true);
   };
 
   return (
     <Layout>
-      <div className="space-y-8">
-        {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold gradient-text">Dashboard</h1>
-          <p className="text-gray-400 mt-1">
-            Analyze Warframe Market Prime set profitability
-          </p>
-        </div>
-
-        {/* Analysis Control Section */}
-        <Card className="border-mint/20 bg-gradient-to-r from-dark-card to-dark-bg">
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-200">Run Analysis</h2>
-                <p className="text-sm text-gray-500">
-                  Fetch latest market data and calculate profitability
-                </p>
-                <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={testMode}
-                    onChange={(e) => setTestMode(e.target.checked)}
-                    className="w-4 h-4 accent-mint rounded bg-dark-bg border-dark-border"
-                  />
-                  <span className="text-sm text-gray-400">Test Mode (Limit 10 sets)</span>
-                </label>
-              </div>
-              <Button
-                onClick={handleRunAnalysis}
-                disabled={isLoading}
-                icon={isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-              >
-                {isLoading ? 'Running...' : 'Run Analysis'}
-              </Button>
-            </div>
-
-            {/* Progress Section */}
-            {isLoading && (
-              <div className="pt-4 border-t border-dark-border">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-gray-400">
-                    {progressMessage || 'Initializing...'}
-                  </span>
-                  <span className="text-sm font-medium text-mint">
-                    {progress ?? 0}%
-                  </span>
-                </div>
-                <div
-                  className="w-full h-4 bg-dark-border rounded-full overflow-hidden"
-                  style={{ animation: 'progress-glow 2s ease-in-out infinite' }}
-                >
-                  <div
-                    className="h-full transition-all duration-300 ease-out"
-                    style={{
-                      width: `${progress ?? 0}%`,
-                      background: 'linear-gradient(90deg, #9FBCAD, #7A9DB1)',
-                      backgroundImage: `
-                        linear-gradient(90deg, #9FBCAD, #7A9DB1),
-                        repeating-linear-gradient(
-                          45deg,
-                          transparent,
-                          transparent 10px,
-                          rgba(255,255,255,0.15) 10px,
-                          rgba(255,255,255,0.15) 20px
-                        )
-                      `,
-                      backgroundSize: '100% 100%, 40px 40px',
-                      animation: 'progress-stripes 1s linear infinite',
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Error Display */}
-            {error && (
-              <div className="pt-4 border-t border-dark-border">
-                <p className="text-profit-negative text-sm">{error}</p>
-              </div>
-            )}
+      <motion.div
+        className="space-y-8"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        {/* Header Section */}
+        <motion.div variants={itemVariants} className="flex items-center justify-between pb-6 border-b border-white/5">
+          <div>
+            <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-[#00f0ff] to-[#8a2be2] uppercase tracking-wider">
+              System Terminal
+            </h1>
+            <p className="text-[#00f0ff]/60 font-mono text-sm uppercase tracking-widest mt-2 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#00f0ff] animate-pulse"></span>
+              Awaiting Directives
+            </p>
           </div>
-        </Card>
+        </motion.div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Global Statistics */}
+        <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           <StatCard
-            label="Total Runs"
+            label="Total Operations"
             value={stats?.database.total_runs || 0}
             icon={<Database className="w-5 h-5" />}
-            color="mint"
+            color="cyan"
           />
           <StatCard
-            label="Prime Sets"
+            label="Monitored Entities"
             value={stats?.analysis.total_prime_sets || '-'}
-            icon={<BarChart3 className="w-5 h-5" />}
-            color="blue"
+            icon={<BarChart2 className="w-5 h-5" />}
+            color="purple"
           />
           <StatCard
-            label="Profitable Sets"
+            label="Profitable Targets"
             value={currentAnalysis?.profitable_sets || '-'}
             subValue={currentAnalysis ? `of ${currentAnalysis.total_sets}` : undefined}
             icon={<TrendingUp className="w-5 h-5" />}
             color="positive"
           />
           <StatCard
-            label="Last Analysis"
+            label="Last Synchronization"
             value={stats?.database.last_run ? new Date(stats.database.last_run).toLocaleDateString() : '-'}
             icon={<Clock className="w-5 h-5" />}
-            color="purple"
+            color="gold"
           />
-        </div>
+        </motion.div>
 
-        {/* Analysis Ready - Direct to Analysis Tab */}
-        {currentAnalysis && !isLoading && (
-          <Card className="border-mint/20 bg-gradient-to-r from-dark-card to-dark-bg">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-200">Analysis Ready</h3>
-                <p className="text-sm text-gray-400 mt-1">
-                  {currentAnalysis.total_sets} sets analyzed • {currentAnalysis.profitable_sets} profitable
-                </p>
-              </div>
-              <Link to="/analysis">
-                <Button icon={<ArrowRight className="w-4 h-4" />}>
-                  View Results
+        {/* Neural Network Execution Control */}
+        <motion.div variants={itemVariants}>
+          <SpotlightCard className="p-8" spotlightColor="rgba(0, 240, 255, 0.1)">
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
+                <div>
+                  <h2 className="text-xl font-bold text-white uppercase tracking-wider mb-2">Execute Market Sweep</h2>
+                  <p className="text-sm text-gray-400 font-mono">
+                    Scrape targeted Prime Sets and evaluate profitability across multiple spectrums.
+                  </p>
+
+                  <label className="flex items-center gap-3 mt-4 cursor-pointer group w-max">
+                    <div className="relative flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={testMode}
+                        onChange={(e) => setTestMode(e.target.checked)}
+                        className="peer sr-only"
+                      />
+                      <div className="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0)] peer-checked:shadow-[0_0_10px_rgba(0,240,255,0.4)]"></div>
+                    </div>
+                    <span className="text-sm font-mono text-gray-400 group-hover:text-[#00f0ff] transition-colors">Test Protocol (Limit 10)</span>
+                  </label>
+                </div>
+
+                <Button
+                  onClick={handleRunAnalysis}
+                  disabled={isLoading}
+                  size="lg"
+                  className="w-full sm:w-auto font-mono uppercase tracking-widest text-sm"
+                  variant={isLoading ? "ghost" : "primary"}
+                  icon={isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
+                >
+                  {isLoading ? 'Processing...' : 'Engage'}
                 </Button>
-              </Link>
-            </div>
-          </Card>
-        )}
+              </div>
 
-        {/* Empty State */}
-        {!currentAnalysis && !isLoading && (
-          <Card className="text-center py-12">
-            <BarChart3 className="w-16 h-16 text-mint mx-auto mb-4 opacity-50" />
-            <h3 className="text-xl font-semibold text-gray-200 mb-2">No Analysis Data</h3>
-            <p className="text-gray-400">
-              Click "Run Analysis" above to fetch market data and calculate profitability
-            </p>
-          </Card>
-        )}
-      </div>
+              {/* Holographic Progress Monitor */}
+              {isLoading && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="pt-6 border-t border-white/10"
+                >
+                  <div className="flex items-center justify-between mb-3 font-mono">
+                    <span className="text-sm text-[#00f0ff] animate-pulse">
+                      {progressMessage || 'Establishing Link...'}
+                    </span>
+                    <span className="text-sm font-bold text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.8)]">
+                      {progress ?? 0}%
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden border border-white/10 relative">
+                    <motion.div
+                      className="absolute top-0 bottom-0 left-0 bg-[#00f0ff] shadow-[0_0_15px_#00f0ff]"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${progress ?? 0}%` }}
+                      transition={{ ease: "linear" }}
+                    >
+                      {/* Grid overlay for tech look inside bar */}
+                      <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.2)_25%,rgba(255,255,255,0.2)_50%,transparent_50%,transparent_75%,rgba(255,255,255,0.2)_75%,rgba(255,255,255,0.2)_100%)] bg-[length:10px_10px] animate-[data-stream_1s_linear_infinite]" />
+                    </motion.div>
+                  </div>
+                </motion.div>
+              )}
+
+              {error && (
+                <motion.div
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                  className="pt-4 border-t border-white/10"
+                >
+                  <div className="p-4 bg-[#ff3366]/10 border border-[#ff3366]/30 rounded-lg flex items-start gap-4 shadow-[inset_0_0_20px_rgba(255,51,102,0.1)]">
+                    <div className="w-2 h-2 mt-1.5 rounded-full bg-[#ff3366] shadow-[0_0_10px_#ff3366]" />
+                    <p className="text-[#ff3366] text-sm font-mono leading-relaxed">{error}</p>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </SpotlightCard>
+        </motion.div>
+
+        {/* Action Link for Ready Analysis */}
+        <AnimatePresence>
+          {currentAnalysis && !isLoading && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <SpotlightCard className="p-6" spotlightColor="rgba(0, 255, 170, 0.15)">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
+                  <div className="flex items-center gap-4">
+                    <div className="w-3 h-3 rounded-full bg-[#00ffaa] shadow-[0_0_15px_#00ffaa] animate-pulse" />
+                    <div>
+                      <h3 className="text-lg font-bold text-white uppercase tracking-wider">Analysis Complete</h3>
+                      <p className="text-sm font-mono text-gray-400 mt-1">
+                        <span className="text-white">{currentAnalysis.total_sets}</span> Entities Scanned | <span className="text-[#00ffaa]">{currentAnalysis.profitable_sets}</span> Profitable Vectors
+                      </p>
+                    </div>
+                  </div>
+                  <Link to="/analysis" className="w-full sm:w-auto">
+                    <Button
+                      variant="primary"
+                      className="w-full font-mono uppercase text-xs"
+                      icon={<ArrowRight className="w-4 h-4" />}
+                    >
+                      Access Data Grid
+                    </Button>
+                  </Link>
+                </div>
+              </SpotlightCard>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Empty State / Standby Mode */}
+        <AnimatePresence>
+          {!currentAnalysis && !isLoading && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ delay: 0.4 }}
+            >
+              <Card className="text-center py-20 border-white/5 opacity-50 relative overflow-hidden group">
+                <div className="absolute inset-0 bg-[linear-gradient(to_right,#00f0ff1a_1px,transparent_1px),linear-gradient(to_bottom,#00f0ff1a_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] z-0" />
+                <div className="relative z-10">
+                  <BarChart2 className="w-16 h-16 text-[#00f0ff]/30 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500" />
+                  <h3 className="text-xl font-mono uppercase tracking-widest text-[#00f0ff]/50 mb-2">Standby Mode</h3>
+                  <p className="text-gray-500 font-mono text-sm max-w-sm mx-auto">
+                    Engage the sweep above to initialize link with the Warframe Market mainframes.
+                  </p>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     </Layout>
   );
 }

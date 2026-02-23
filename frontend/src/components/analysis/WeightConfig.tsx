@@ -55,11 +55,10 @@ export function WeightConfig({ profitWeight, volumeWeight, onApply, loading }: W
           <button
             key={preset.name}
             onClick={() => applyPreset(preset)}
-            className={`px-3 py-1.5 text-sm rounded-lg border transition-all duration-200 ${
-              profit === preset.profit && volume === preset.volume
+            className={`px-3 py-1.5 text-sm rounded-lg border transition-all duration-200 ${profit === preset.profit && volume === preset.volume
                 ? 'border-mint bg-mint/10 text-mint'
                 : 'border-dark-border text-gray-400 hover:border-mint/30 hover:text-gray-200'
-            }`}
+              }`}
           >
             {preset.name}
           </button>
@@ -104,7 +103,7 @@ export function WeightConfig({ profitWeight, volumeWeight, onApply, loading }: W
       {/* Apply Button */}
       <Button
         onClick={handleApply}
-        loading={loading}
+        isLoading={loading}
         className="w-full"
         disabled={profit === profitWeight && volume === volumeWeight}
       >
