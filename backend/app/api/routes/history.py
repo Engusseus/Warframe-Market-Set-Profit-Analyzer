@@ -32,10 +32,7 @@ async def get_history(
         offset = (page - 1) * page_size
 
         # Get run summaries
-        runs = await db.get_run_summary(limit=page_size + offset)
-
-        # Apply pagination
-        paginated_runs = runs[offset:offset + page_size] if offset < len(runs) else []
+        paginated_runs = await db.get_run_summary_page(limit=page_size, offset=offset)
 
         # Convert to response models
         history_runs = [
@@ -129,7 +126,18 @@ async def get_run_analysis(run_id: int) -> AnalysisResponse:
                 normalized_volume=s['normalized_volume'],
                 profit_score=s['profit_score'],
                 volume_score=s['volume_score'],
-                total_score=s['total_score']
+                total_score=s['total_score'],
+                trend_slope=s.get('trend_slope', 0.0),
+                trend_multiplier=s.get('trend_multiplier', 1.0),
+                trend_direction=s.get('trend_direction', 'stable'),
+                volatility=s.get('volatility', 0.0),
+                volatility_penalty=s.get('volatility_penalty', 1.0),
+                risk_level=s.get('risk_level', 'Medium'),
+                composite_score=s.get('composite_score', s['total_score']),
+                profit_contribution=s.get('profit_contribution', 0.0),
+                volume_contribution=s.get('volume_contribution', 0.0),
+                trend_contribution=s.get('trend_contribution', 1.0),
+                volatility_contribution=s.get('volatility_contribution', 1.0)
             )
             for s in analysis_data['sets']
         ]
@@ -145,8 +153,10 @@ async def get_run_analysis(run_id: int) -> AnalysisResponse:
             profitable_sets=analysis_data['profitable_sets'],
             weights=WeightsConfig(
                 profit_weight=analysis_data['weights']['profit_weight'],
-                volume_weight=analysis_data['weights']['volume_weight']
+                volume_weight=analysis_data['weights']['volume_weight'],
+                strategy=analysis_data['weights'].get('strategy', 'balanced')
             ),
+            strategy=analysis_data.get('strategy', 'balanced'),
             cached=True  # Historical data is essentially cached
         )
 

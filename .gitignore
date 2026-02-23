@@ -9,12 +9,15 @@ INITIAL.md
 
 # BMAD framework
 .bmad/
+_bmad/
 docs/
 
 # Node.js / Frontend
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/playwright-report/
+frontend/test-results/
 *.log
 npm-debug.log*
 

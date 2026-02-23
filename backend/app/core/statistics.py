@@ -191,7 +191,7 @@ def calculate_metrics_from_history(
         - risk_level: "Low", "Medium", or "High"
         - data_points: Number of data points used
     """
-    if not price_history or len(price_history) < 2:
+    if not price_history:
         return {
             'trend_slope': 0.0,
             'trend_multiplier': 1.0,
@@ -199,12 +199,38 @@ def calculate_metrics_from_history(
             'volatility': 0.0,
             'volatility_penalty': 1.0,
             'risk_level': 'Medium',
-            'data_points': len(price_history) if price_history else 0
+            'data_points': 0
         }
 
+    cleaned_history = []
+    for entry in price_history:
+        if not isinstance(entry, dict):
+            continue
+        price = entry.get('lowest_price')
+        timestamp = entry.get('timestamp')
+        if isinstance(price, (int, float)) and isinstance(timestamp, (int, float)):
+            cleaned_history.append({
+                'lowest_price': float(price),
+                'timestamp': int(timestamp)
+            })
+
+    if len(cleaned_history) < 2:
+        return {
+            'trend_slope': 0.0,
+            'trend_multiplier': 1.0,
+            'trend_direction': 'stable',
+            'volatility': 0.0,
+            'volatility_penalty': 1.0,
+            'risk_level': 'Medium',
+            'data_points': len(cleaned_history)
+        }
+
+    # Ensure chronological ordering before trend analysis.
+    cleaned_history.sort(key=lambda item: item['timestamp'])
+
     # Extract prices and timestamps
-    prices = [h['lowest_price'] for h in price_history]
-    timestamps = [h['timestamp'] for h in price_history]
+    prices = [h['lowest_price'] for h in cleaned_history]
+    timestamps = [h['timestamp'] for h in cleaned_history]
 
     # Calculate trend metrics
     slope = calculate_linear_regression_slope(prices, timestamps)
@@ -215,7 +241,7 @@ def calculate_metrics_from_history(
 
     # Calculate volatility metrics
     volatility = calculate_volatility(prices)
-    mean_price = statistics.mean(prices)
+    mean_price = statistics.fmean(prices)
     volatility_penalty = calculate_volatility_penalty(volatility, mean_price)
     risk_level = classify_risk_level(volatility_penalty)
 
@@ -226,7 +252,7 @@ def calculate_metrics_from_history(
         'volatility': volatility,
         'volatility_penalty': volatility_penalty,
         'risk_level': risk_level,
-        'data_points': len(price_history)
+        'data_points': len(cleaned_history)
     }
 
 

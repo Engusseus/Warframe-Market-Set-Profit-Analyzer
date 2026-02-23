@@ -47,7 +47,7 @@ class RateLimiter:
         allowing other coroutines to run.
         """
         async with self._lock:
-            current_time = time.time()
+            current_time = time.monotonic()
 
             # Remove requests older than time_window
             self._cleanup_old_requests(current_time)
@@ -62,7 +62,7 @@ class RateLimiter:
                     await asyncio.sleep(sleep_time)
 
                     # Clean up after waiting
-                    current_time = time.time()
+                    current_time = time.monotonic()
                     self._cleanup_old_requests(current_time)
 
             # Record this request
@@ -70,7 +70,7 @@ class RateLimiter:
 
     def get_current_rate(self) -> int:
         """Get the current number of requests in the time window."""
-        current_time = time.time()
+        current_time = time.monotonic()
         self._cleanup_old_requests(current_time)
         return len(self.requests)
 
@@ -79,7 +79,7 @@ class RateLimiter:
 
         Preserved for backwards compatibility with sync code.
         """
-        current_time = time.time()
+        current_time = time.monotonic()
 
         # Remove requests older than time_window
         self._cleanup_old_requests(current_time)
@@ -94,7 +94,7 @@ class RateLimiter:
                 time.sleep(sleep_time)
 
                 # Clean up after waiting
-                current_time = time.time()
+                current_time = time.monotonic()
                 self._cleanup_old_requests(current_time)
 
         # Record this request
