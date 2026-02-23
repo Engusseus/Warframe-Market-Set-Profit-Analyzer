@@ -4,6 +4,7 @@ import { Database, Clock, TrendingUp, Play, Loader2, ArrowRight, BarChart2 } fro
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Variants } from 'framer-motion';
+import { clsx } from 'clsx';
 import { runAnalysis, getStats } from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
 import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
@@ -11,6 +12,7 @@ import { Layout } from '../components/layout/Layout';
 import { StatCard, Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { SpotlightCard } from '../components/common/SpotlightCard';
+import type { ExecutionMode } from '../api/types';
 
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -41,6 +43,8 @@ export function Dashboard() {
     error,
     setError,
     strategy,
+    executionMode,
+    setExecutionMode,
     progress,
     progressMessage,
     setProgress,
@@ -64,14 +68,14 @@ export function Dashboard() {
     setProgress(0, 'Initialize System Uplink...');
 
     try {
-      const result = await runAnalysis(strategy, false, testMode);
+      const result = await runAnalysis(strategy, executionMode, false, testMode);
       setAnalysis(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Uplink failed');
     } finally {
       setLoading(false);
     }
-  }, [strategy, setAnalysis, setError, setLoading, setProgress, testMode]);
+  }, [strategy, executionMode, setAnalysis, setError, setLoading, setProgress, testMode]);
 
   const handleConnected = useCallback(() => {
     if (isInitiating) {
@@ -156,6 +160,34 @@ export function Dashboard() {
                   <p className="text-sm text-gray-400 font-mono">
                     Scrape targeted Prime Sets and evaluate profitability across multiple spectrums.
                   </p>
+
+                  <div className="mt-4">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-mono mb-2">
+                      Execution Mode
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 p-1 rounded-lg bg-black/50 border border-white/10 max-w-xs">
+                      {(['instant', 'patient'] as ExecutionMode[]).map((mode) => {
+                        const selected = executionMode === mode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            onClick={() => setExecutionMode(mode)}
+                            disabled={isLoading}
+                            className={clsx(
+                              'px-3 py-2 rounded-md text-xs uppercase tracking-widest font-mono border transition-all',
+                              selected
+                                ? 'border-[#00f0ff]/40 bg-[#00f0ff]/15 text-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.2)]'
+                                : 'border-white/10 text-gray-400 hover:border-[#00f0ff]/30 hover:text-white',
+                              isLoading && 'opacity-60 cursor-not-allowed'
+                            )}
+                          >
+                            {mode}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
 
                   <label className="flex items-center gap-3 mt-4 cursor-pointer group w-max">
                     <div className="relative flex items-center">

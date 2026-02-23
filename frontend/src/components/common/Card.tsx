@@ -16,16 +16,15 @@ export function Card({ children, className, hoverable = false, onClick, glowingB
       whileHover={hoverable ? { y: -2, scale: 1.01 } : {}}
       transition={{ duration: 0.2 }}
       className={cn(
-        'relative bg-black/40 backdrop-blur-xl border border-white/5 rounded-xl p-5',
-        'shadow-[0_4px_30px_rgba(0,0,0,0.5)]',
-        hoverable && 'cursor-pointer hover:border-[#00f0ff]/30 hover:shadow-[0_0_20px_rgba(0,240,255,0.1)] transition-colors duration-300',
-        glowingBorder && 'border-[#00f0ff]/20 shadow-[inset_0_0_20px_rgba(0,240,255,0.05)]',
+        'relative card wf-corner p-5',
+        hoverable && 'card-hover cursor-pointer',
+        glowingBorder && 'border-[#e5c158]/30 shadow-[inset_0_0_15px_rgba(229,193,88,0.1)]',
         className
       )}
       onClick={onClick}
     >
       {glowingBorder && (
-        <div className="absolute inset-0 rounded-xl pointer-events-none animate-pulse-glow" aria-hidden="true" />
+        <div className="absolute inset-0 wf-corner pointer-events-none animate-pulse-glow" aria-hidden="true" />
       )}
       <div className="relative z-10 w-full h-full">
         {children}
@@ -45,16 +44,16 @@ interface StatCardProps {
 
 export function StatCard({ label, value, subValue, color = 'cyan', icon, className }: StatCardProps) {
   const colorStyles = {
-    cyan: 'text-[#00f0ff] bg-[#00f0ff]/10 border-[#00f0ff]/20',
-    gold: 'text-[#ffd700] bg-[#ffd700]/10 border-[#ffd700]/20',
+    cyan: 'text-[#2ebfcc] bg-[#2ebfcc]/10 border-[#2ebfcc]/20',
+    gold: 'text-[#e5c158] bg-[#e5c158]/10 border-[#e5c158]/20',
     purple: 'text-[#8a2be2] bg-[#8a2be2]/10 border-[#8a2be2]/20',
     positive: 'text-[#00ffaa] bg-[#00ffaa]/10 border-[#00ffaa]/20',
     negative: 'text-[#ff3366] bg-[#ff3366]/10 border-[#ff3366]/20',
   };
 
   const textGradient = {
-    cyan: 'bg-gradient-to-br from-white to-[#00f0ff]',
-    gold: 'bg-gradient-to-br from-white to-[#ffd700]',
+    cyan: 'bg-gradient-to-br from-white to-[#2ebfcc]',
+    gold: 'bg-gradient-to-br from-white to-[#e5c158]',
     purple: 'bg-gradient-to-br from-white to-[#8a2be2]',
     positive: 'bg-gradient-to-br from-white to-[#00ffaa]',
     negative: 'bg-gradient-to-br from-white to-[#ff3366]',
@@ -69,7 +68,7 @@ export function StatCard({ label, value, subValue, color = 'cyan', icon, classNa
       )} style={{ backgroundColor: 'currentColor' }} />
 
       {icon && (
-        <div className={cn('p-3 rounded-lg border backdrop-blur-md z-10', colorStyles[color])}>
+        <div className={cn('p-3 wf-corner border backdrop-blur-md z-10', colorStyles[color])}>
           {icon}
         </div>
       )}

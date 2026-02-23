@@ -10,12 +10,17 @@ import { Button } from '../components/common/Button';
 import { ProfitTable } from '../components/analysis/ProfitTable';
 import { StrategySelector } from '../components/analysis/StrategySelector';
 import { SpotlightCard } from '../components/common/SpotlightCard';
-import type { StrategyType } from '../api/types';
+import type { StrategyType, ExecutionMode } from '../api/types';
 
 const strategyNames: Record<StrategyType, string> = {
   safe_steady: 'Safe & Steady',
   balanced: 'Balanced',
   aggressive: 'Aggressive Growth',
+};
+
+const executionModeNames: Record<ExecutionMode, string> = {
+  instant: 'Instant',
+  patient: 'Patient',
 };
 
 const containerVariants: Variants = {
@@ -45,23 +50,27 @@ export function Analysis() {
     setError,
     strategy,
     setStrategy,
+    executionMode,
+    setExecutionMode,
   } = useAnalysisStore();
 
   const [showFilters, setShowFilters] = useState(true);
   const [isRescoring, setIsRescoring] = useState(false);
 
-  const handleStrategyChange = async (newStrategy: StrategyType) => {
+  const handleRescore = async (newStrategy: StrategyType, newExecutionMode: ExecutionMode) => {
     if (!currentAnalysis) return;
 
     setIsRescoring(true);
     setError(null);
     try {
-      const result = await rescoreAnalysis(newStrategy);
+      const result = await rescoreAnalysis(newStrategy, newExecutionMode);
       setStrategy(newStrategy);
+      setExecutionMode(newExecutionMode);
       setAnalysis({
         ...currentAnalysis,
         sets: result.sets,
         strategy: newStrategy,
+        execution_mode: result.execution_mode ?? newExecutionMode,
         weights: result.weights,
       });
     } catch (err) {
@@ -69,6 +78,14 @@ export function Analysis() {
     } finally {
       setIsRescoring(false);
     }
+  };
+
+  const handleStrategyChange = async (newStrategy: StrategyType) => {
+    await handleRescore(newStrategy, executionMode);
+  };
+
+  const handleExecutionModeChange = async (newExecutionMode: ExecutionMode) => {
+    await handleRescore(strategy, newExecutionMode);
   };
 
   return (
@@ -138,7 +155,9 @@ export function Analysis() {
                   >
                     <StrategySelector
                       currentStrategy={strategy}
+                      currentExecutionMode={executionMode}
                       onStrategyChange={handleStrategyChange}
+                      onExecutionModeChange={handleExecutionModeChange}
                       loading={isRescoring}
                     />
 
@@ -155,6 +174,12 @@ export function Analysis() {
                           <span className="text-gray-500">Vector</span>
                           <span className="text-[#8a2be2] font-bold">
                             {strategyNames[currentAnalysis.strategy || strategy]}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center bg-black/40 p-3 rounded border border-white/5">
+                          <span className="text-gray-500">Execution</span>
+                          <span className="text-[#00f0ff] font-bold">
+                            {executionModeNames[currentAnalysis.execution_mode || executionMode]}
                           </span>
                         </div>
                         <div className="flex justify-between items-center bg-black/40 p-3 rounded border border-white/5">

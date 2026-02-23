@@ -27,17 +27,17 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ref
   ) => {
     const baseStyles =
-      'relative inline-flex items-center justify-center font-medium rounded-lg transition-all duration-300 overflow-hidden';
+      'relative inline-flex items-center justify-center font-medium wf-corner transition-all duration-300 overflow-hidden';
 
     const variants = {
       primary:
-        'bg-[#00f0ff]/10 text-[#00f0ff] border border-[#00f0ff]/50 hover:bg-[#00f0ff]/20 hover:shadow-[0_0_15px_rgba(0,240,255,0.4)]',
+        'bg-[#2ebfcc]/10 text-[#2ebfcc] border border-[#2ebfcc]/50 hover:bg-[#2ebfcc]/20 hover:shadow-[0_0_10px_rgba(46,191,204,0.2)]',
       secondary:
-        'bg-[#ffd700]/10 text-[#ffd700] border border-[#ffd700]/50 hover:bg-[#ffd700]/20 hover:shadow-[0_0_15px_rgba(255,215,0,0.4)]',
+        'bg-[#e5c158]/10 text-[#e5c158] border border-[#e5c158]/50 hover:bg-[#e5c158]/20 hover:shadow-[0_0_10px_rgba(229,193,88,0.2)]',
       ghost:
         'bg-transparent text-gray-300 hover:text-white hover:bg-white/5 border border-transparent',
       danger:
-        'bg-[#ff3366]/10 text-[#ff3366] border border-[#ff3366]/50 hover:bg-[#ff3366]/20 hover:shadow-[0_0_15px_rgba(255,51,102,0.4)]',
+        'bg-[#ff3366]/10 text-[#ff3366] border border-[#ff3366]/50 hover:bg-[#ff3366]/20 hover:shadow-[0_0_10px_rgba(255,51,102,0.2)]',
     };
 
     const sizes = {
@@ -66,7 +66,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       >
         {/* Glow sweep effect */}
         {!isDisabled && (
-          <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden rounded-lg">
+          <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden wf-corner">
             <div className="absolute top-0 -left-[100%] w-1/2 h-full bg-gradient-to-r from-transparent via-white/10 to-transparent skew-x-[45deg] animate-[sweep_3s_ease-in-out_infinite]" />
           </div>
         )}

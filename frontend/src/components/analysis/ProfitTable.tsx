@@ -20,7 +20,7 @@ interface ProfitTableProps {
   onSelectSet?: (set: ScoredSet) => void;
 }
 
-type SortField = 'rank' | 'name' | 'profit' | 'volume' | 'score' | 'roi' | 'trend' | 'risk';
+type SortField = 'rank' | 'name' | 'profit' | 'volume' | 'liquidity' | 'score' | 'roi' | 'trend' | 'risk';
 
 function TrendIndicator({ set }: { set: ScoredSet }) {
   const direction = set.trend_direction;
@@ -54,7 +54,7 @@ function TrendIndicator({ set }: { set: ScoredSet }) {
 function RiskBadge({ level }: { level: string }) {
   const colors: Record<string, string> = {
     Low: 'bg-[#00ffaa]/10 text-[#00ffaa] border-[#00ffaa]/30 shadow-[0_0_10px_rgba(0,255,170,0.1)]',
-    Medium: 'bg-[#ffd700]/10 text-[#ffd700] border-[#ffd700]/30 shadow-[0_0_10px_rgba(255,215,0,0.1)]',
+    Medium: 'bg-[#e5c158]/10 text-[#e5c158] border-[#e5c158]/30 shadow-[0_0_10px_rgba(255,215,0,0.1)]',
     High: 'bg-[#ff3366]/10 text-[#ff3366] border-[#ff3366]/30 shadow-[0_0_10px_rgba(255,51,102,0.1)]',
   };
 
@@ -70,7 +70,7 @@ function RiskBadge({ level }: { level: string }) {
   );
 }
 
-export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProps) {
+export function ProfitTable({ sets, onSelectSet }: ProfitTableProps) {
   const [sortField, setSortField] = useState<SortField>('score');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
@@ -110,11 +110,16 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
         aVal = a.trend_multiplier;
         bVal = b.trend_multiplier;
         break;
-      case 'risk':
+      case 'liquidity':
+        aVal = a.liquidity_multiplier ?? 1;
+        bVal = b.liquidity_multiplier ?? 1;
+        break;
+      case 'risk': {
         const riskOrder: Record<string, number> = { Low: 0, Medium: 1, High: 2 };
         aVal = riskOrder[a.risk_level] ?? 1;
         bVal = riskOrder[b.risk_level] ?? 1;
         break;
+      }
       case 'score':
       default:
         aVal = a.composite_score;
@@ -133,48 +138,95 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
   const paginatedSets = sortedSets.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(sets.length / pageSize);
 
-  const SortIcon = ({ field }: { field: SortField }) => {
+  const getSortIcon = (field: SortField) => {
     if (sortField !== field) return null;
     return sortDir === 'asc' ? (
-      <ChevronUp className="w-4 h-4 text-[#00f0ff]" />
+      <ChevronUp className="w-4 h-4 text-[#2ebfcc]" />
     ) : (
-      <ChevronDown className="w-4 h-4 text-[#00f0ff]" />
+      <ChevronDown className="w-4 h-4 text-[#2ebfcc]" />
     );
   };
 
-  const HeaderCell = ({
-    field,
-    children,
-  }: {
-    field: SortField;
-    children: React.ReactNode;
-  }) => (
-    <th
-      className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#00f0ff]/20 text-xs font-mono uppercase tracking-widest text-[#00f0ff]/70 hover:text-[#00f0ff]"
-      onClick={() => handleSort(field)}
-    >
-      <div className="flex items-center space-x-2">
-        <span>{children}</span>
-        <SortIcon field={field} />
-      </div>
-    </th>
-  );
-
   return (
-    <div className="flex flex-col bg-black/40 backdrop-blur-xl border border-white/5 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] overflow-hidden relative">
+    <div className="flex flex-col bg-dark-card border border-dark-border wf-corner shadow-[0_4px_20px_rgba(0,0,0,0.2)] overflow-hidden relative">
       <div className="overflow-x-auto relative z-10">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-black/60 sticky top-0 backdrop-blur-md">
-              <th className="px-4 py-4 w-14 border-b border-[#00f0ff]/20"></th>
-              <HeaderCell field="name">Entity Designation</HeaderCell>
-              <HeaderCell field="profit">Net Yield</HeaderCell>
-              <HeaderCell field="volume">Vol</HeaderCell>
-              <HeaderCell field="trend">Vector</HeaderCell>
-              <HeaderCell field="risk">Risk Var</HeaderCell>
-              <HeaderCell field="score">Comp Score</HeaderCell>
-              <HeaderCell field="roi">ROI</HeaderCell>
-              <th className="w-12 border-b border-[#00f0ff]/20"></th>
+              <th className="px-4 py-4 w-14 border-b border-[#2ebfcc]/20"></th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('name')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>Entity Designation</span>
+                  {getSortIcon('name')}
+                </div>
+              </th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('profit')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>Net Yield</span>
+                  {getSortIcon('profit')}
+                </div>
+              </th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('volume')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>Vol</span>
+                  {getSortIcon('volume')}
+                </div>
+              </th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('liquidity')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>Liquidity</span>
+                  {getSortIcon('liquidity')}
+                </div>
+              </th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('trend')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>Vector</span>
+                  {getSortIcon('trend')}
+                </div>
+              </th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('risk')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>Risk Var</span>
+                  {getSortIcon('risk')}
+                </div>
+              </th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('score')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>Comp Score</span>
+                  {getSortIcon('score')}
+                </div>
+              </th>
+              <th
+                className="px-4 py-4 cursor-pointer hover:bg-white/5 transition-colors border-b border-[#2ebfcc]/20 text-xs font-mono uppercase tracking-widest text-[#2ebfcc]/70 hover:text-[#2ebfcc]"
+                onClick={() => handleSort('roi')}
+              >
+                <div className="flex items-center space-x-2">
+                  <span>ROI</span>
+                  {getSortIcon('roi')}
+                </div>
+              </th>
+              <th className="w-12 border-b border-[#2ebfcc]/20"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-white/5">
@@ -192,19 +244,22 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
                       exit={{ opacity: 0, scale: 0.95 }}
                       transition={{ duration: 0.2, delay: Math.min(idx * 0.05, 0.5) }}
                       className={cn(
-                        'hover:bg-[#00f0ff]/5 transition-colors cursor-pointer group',
-                        rank === 1 && 'bg-[#ffd700]/5',
+                        'hover:bg-[#2ebfcc]/5 transition-colors cursor-pointer group',
+                        rank === 1 && 'bg-[#e5c158]/5',
                         rank === 2 && 'bg-white/5',
                         rank === 3 && 'bg-[#ff7f50]/5',
-                        isExpanded && 'bg-[#00f0ff]/10 border-l-2 border-l-[#00f0ff]'
+                        isExpanded && 'bg-[#2ebfcc]/10 border-l-2 border-l-[#2ebfcc]'
                       )}
-                      onClick={() => setExpandedRow(isExpanded ? null : set.set_slug)}
+                      onClick={() => {
+                        setExpandedRow(isExpanded ? null : set.set_slug);
+                        onSelectSet?.(set);
+                      }}
                     >
                       <td className="px-4 py-3 align-middle">
                         <span
                           className={cn(
                             'inline-flex items-center justify-center w-7 h-7 rounded bg-black/50 border font-mono text-xs shadow-inner',
-                            rank === 1 ? 'border-[#ffd700] text-[#ffd700] shadow-[0_0_10px_rgba(255,215,0,0.3)]' :
+                            rank === 1 ? 'border-[#e5c158] text-[#e5c158] shadow-[0_0_10px_rgba(255,215,0,0.3)]' :
                               rank === 2 ? 'border-gray-300 text-gray-300' :
                                 rank === 3 ? 'border-[#ff7f50] text-[#ff7f50]' :
                                   'border-white/10 text-gray-500'
@@ -229,8 +284,18 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 align-middle font-mono text-[#00f0ff]">
+                      <td className="px-4 py-3 align-middle font-mono text-[#2ebfcc]">
                         {set.volume.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 align-middle font-mono">
+                        <div className="flex flex-col">
+                          <span className="text-[#2ebfcc]">
+                            x{(set.liquidity_multiplier ?? 1).toFixed(2)}
+                          </span>
+                          <span className="text-[10px] text-gray-500 uppercase tracking-wider">
+                            v{(set.liquidity_velocity ?? 0).toFixed(2)}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 align-middle">
                         <TrendIndicator set={set} />
@@ -248,11 +313,11 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
                         </span>
                       </td>
                       <td className="px-4 py-3 align-middle">
-                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 group-hover:bg-[#00f0ff]/20 transition-colors">
+                        <span className="flex items-center justify-center w-8 h-8 rounded-full bg-white/5 group-hover:bg-[#2ebfcc]/20 transition-colors">
                           <ChevronRight
                             className={cn(
-                              'w-4 h-4 text-gray-400 group-hover:text-[#00f0ff] transition-transform duration-300',
-                              isExpanded && 'rotate-90 text-[#00f0ff]'
+                              'w-4 h-4 text-gray-400 group-hover:text-[#2ebfcc] transition-transform duration-300',
+                              isExpanded && 'rotate-90 text-[#2ebfcc]'
                             )}
                           />
                         </span>
@@ -268,12 +333,12 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
                           transition={{ duration: 0.3 }}
                           className="bg-black border-b border-white/5 overflow-hidden"
                         >
-                          <td colSpan={9} className="p-0">
-                            <div className="p-6 border-l-2 border-[#00f0ff] ml-[1px] bg-gradient-to-r from-[#00f0ff]/5 to-transparent flex flex-col lg:flex-row gap-8">
+                          <td colSpan={10} className="p-0">
+                            <div className="p-6 border-l-2 border-[#2ebfcc] ml-[1px] bg-gradient-to-r from-[#2ebfcc]/5 to-transparent flex flex-col lg:flex-row gap-8">
                               {/* Market Datacore Breakdown */}
                               <div className="flex-1 space-y-6">
-                                <h4 className="text-[#00f0ff] text-xs font-mono uppercase tracking-widest pl-2 border-l border-[#00f0ff]/30">Financial Telemetry</h4>
-                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <h4 className="text-[#2ebfcc] text-xs font-mono uppercase tracking-widest pl-2 border-l border-[#2ebfcc]/30">Financial Telemetry</h4>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                   <div className="bg-black/50 border border-white/10 rounded-lg p-3">
                                     <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Target Yield</p>
                                     <p className="text-xl font-mono text-white">{set.set_price.toFixed(0)} <span className="text-xs text-[#00ffaa]">pt</span></p>
@@ -295,6 +360,28 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
                                     <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Volatility</p>
                                     <p className="text-xl font-mono text-[#ff7f50]">/{set.volatility_penalty.toFixed(2)}</p>
                                   </div>
+                                  <div className="bg-black/50 border border-white/10 rounded-lg p-3">
+                                    <p className="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Liquidity</p>
+                                    <p className="text-xl font-mono text-[#2ebfcc]">x{(set.liquidity_multiplier ?? 1).toFixed(2)}</p>
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <h4 className="text-white/50 text-xs font-mono uppercase tracking-widest mb-3">Liquidity Telemetry</h4>
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <div className="flex justify-between items-center bg-white/5 border border-white/5 rounded px-3 py-2 text-xs font-mono uppercase tracking-wider">
+                                      <span className="text-gray-500">Bid/Ask</span>
+                                      <span className="text-[#2ebfcc]">{(set.bid_ask_ratio ?? 0).toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center bg-white/5 border border-white/5 rounded px-3 py-2 text-xs font-mono uppercase tracking-wider">
+                                      <span className="text-gray-500">Sell Comp</span>
+                                      <span className="text-[#e5c158]">{(set.sell_side_competition ?? 0).toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center bg-white/5 border border-white/5 rounded px-3 py-2 text-xs font-mono uppercase tracking-wider">
+                                      <span className="text-gray-500">Velocity</span>
+                                      <span className="text-[#00ffaa]">{(set.liquidity_velocity ?? 0).toFixed(2)}</span>
+                                    </div>
+                                  </div>
                                 </div>
 
                                 {set.part_details.length > 0 && (
@@ -304,11 +391,11 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
                                       {set.part_details.map((part) => (
                                         <div
                                           key={part.code}
-                                          className="flex justify-between items-center bg-white/5 border border-white/5 hover:border-[#00f0ff]/30 rounded px-3 py-2 text-sm transition-colors"
+                                          className="flex justify-between items-center bg-white/5 border border-white/5 hover:border-[#2ebfcc]/30 rounded px-3 py-2 text-sm transition-colors"
                                         >
                                           <span className="text-gray-300 font-medium truncate pr-2">{part.name}</span>
                                           <div className="flex flex-col items-end whitespace-nowrap">
-                                            <span className="text-[#00f0ff] font-mono text-xs">
+                                            <span className="text-[#2ebfcc] font-mono text-xs">
                                               {part.unit_price.toFixed(0)}×{part.quantity}
                                             </span>
                                             <span className="text-[#00ffaa] font-mono font-bold">
@@ -343,7 +430,7 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
       {totalPages > 1 && (
         <div className="flex items-center justify-between px-6 py-4 bg-black/60 border-t border-white/10 relative z-10">
           <p className="text-xs font-mono tracking-widest text-gray-500 uppercase">
-            Indices <span className="text-[#00f0ff]">{page * pageSize + 1}</span> — <span className="text-[#00f0ff]">{Math.min((page + 1) * pageSize, sets.length)}</span> / {sets.length}
+            Indices <span className="text-[#2ebfcc]">{page * pageSize + 1}</span> — <span className="text-[#2ebfcc]">{Math.min((page + 1) * pageSize, sets.length)}</span> / {sets.length}
           </p>
           <div className="flex space-x-2">
             <button
@@ -356,7 +443,7 @@ export function ProfitTable({ sets, onSelectSet: _onSelectSet }: ProfitTableProp
             <button
               onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
               disabled={page === totalPages - 1}
-              className="px-4 py-2 border border-[#00f0ff]/50 rounded text-xs font-mono uppercase tracking-widest text-[#00f0ff] hover:bg-[#00f0ff]/10 hover:shadow-[0_0_10px_rgba(0,240,255,0.2)] disabled:opacity-30 disabled:border-white/10 disabled:text-white disabled:hover:bg-transparent transition-all"
+              className="px-4 py-2 border border-[#2ebfcc]/50 rounded text-xs font-mono uppercase tracking-widest text-[#2ebfcc] hover:bg-[#2ebfcc]/10 hover:shadow-[0_0_10px_rgba(0,240,255,0.2)] disabled:opacity-30 disabled:border-white/10 disabled:text-white disabled:hover:bg-transparent transition-all"
             >
               Next
             </button>

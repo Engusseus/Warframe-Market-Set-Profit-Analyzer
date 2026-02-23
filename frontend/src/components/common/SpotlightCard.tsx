@@ -20,7 +20,7 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
     children,
     className,
     containerClassName,
-    spotlightColor = 'rgba(0, 240, 255, 0.15)', // Default Neon Cyan
+    spotlightColor = 'rgba(229, 193, 88, 0.08)', // Default Gold Spotlight
     ...props
 }) => {
     const divRef = useRef<HTMLDivElement>(null);
@@ -64,7 +64,7 @@ export const SpotlightCard: React.FC<SpotlightCardProps> = ({
             onMouseEnter={handleMouseEnter}
             onMouseLeave={handleMouseLeave}
             className={cn(
-                'relative overflow-hidden rounded-xl border border-white/5 bg-black/40 glass-panel glass-panel-hover',
+                'relative overflow-hidden wf-corner glass-panel glass-panel-hover',
                 containerClassName
             )}
             initial={{ opacity: 0, y: 20 }}

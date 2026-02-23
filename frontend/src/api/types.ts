@@ -1,5 +1,6 @@
 // Strategy Types
 export type StrategyType = 'safe_steady' | 'balanced' | 'aggressive';
+export type ExecutionMode = 'instant' | 'patient';
 export type RiskLevel = 'Low' | 'Medium' | 'High';
 export type TrendDirection = 'rising' | 'falling' | 'stable';
 
@@ -20,6 +21,10 @@ export interface PartDetail {
   unit_price: number;
   quantity: number;
   total_cost: number;
+  instant_unit_price?: number;
+  patient_unit_price?: number;
+  instant_total_cost?: number;
+  patient_total_cost?: number;
 }
 
 export interface ScoredSet {
@@ -30,7 +35,20 @@ export interface ScoredSet {
   profit_margin: number;
   profit_percentage: number;
   part_details: PartDetail[];
+  execution_mode?: ExecutionMode;
+  instant_set_price?: number;
+  instant_part_cost?: number;
+  instant_profit_margin?: number;
+  instant_profit_percentage?: number;
+  patient_set_price?: number;
+  patient_part_cost?: number;
+  patient_profit_margin?: number;
+  patient_profit_percentage?: number;
   volume: number;
+  bid_ask_ratio?: number;
+  sell_side_competition?: number;
+  liquidity_velocity?: number;
+  liquidity_multiplier?: number;
   normalized_profit: number;
   normalized_volume: number;
   profit_score: number;
@@ -51,6 +69,7 @@ export interface ScoredSet {
   volume_contribution: number;
   trend_contribution: number;
   volatility_contribution: number;
+  liquidity_contribution?: number;
 }
 
 // Analysis Types
@@ -68,6 +87,7 @@ export interface AnalysisResponse {
   profitable_sets: number;
   weights: WeightsConfig;
   strategy: StrategyType;
+  execution_mode?: ExecutionMode;
   cached: boolean;
 }
 
@@ -83,6 +103,7 @@ export interface RescoreResponse {
   total_sets: number;
   profitable_sets: number;
   strategy: StrategyType;
+  execution_mode?: ExecutionMode;
   weights: WeightsConfig;
 }
 

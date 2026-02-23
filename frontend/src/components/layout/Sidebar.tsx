@@ -22,17 +22,13 @@ export function Sidebar() {
             className="relative flex flex-col h-screen bg-black/80 backdrop-blur-xl border-r border-white/10 z-50 flex-shrink-0"
         >
             {/* Decorative top gradient */}
-            <div className="absolute top-0 w-full h-32 bg-gradient-to-b from-[#00f0ff]/10 to-transparent pointer-events-none" />
+            <div className="absolute top-0 w-full h-32 bg-gradient-to-b from-[#e5c158]/5 to-transparent pointer-events-none" />
 
             {/* Header Logo Area */}
             <div className="flex items-center p-6 h-24 mb-4">
                 <Link to="/" className="flex items-center gap-4 w-full">
-                    <div className="relative flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-[#00f0ff] via-[#8a2be2] to-[#ffd700] p-[1px]">
-                        <div className="w-full h-full bg-black rounded-lg flex items-center justify-center">
-                            <BarChart3 className="w-5 h-5 text-[#00f0ff]" />
-                        </div>
-                        {/* Pulsing glow */}
-                        <div className="absolute inset-0 bg-[#00f0ff]/30 blur-md rounded-lg -z-10 animate-pulse-glow" />
+                    <div className="relative flex-shrink-0 w-10 h-10 border border-[#e5c158]/30 bg-[#1a1c23] wf-corner flex items-center justify-center shadow-[0_0_15px_rgba(229,193,88,0.1)]">
+                        <BarChart3 className="w-5 h-5 text-[#e5c158]" />
                     </div>
 
                     <AnimatePresence mode="wait">
@@ -44,8 +40,8 @@ export function Sidebar() {
                                 transition={{ duration: 0.2 }}
                                 className="whitespace-nowrap overflow-hidden"
                             >
-                                <h1 className="text-lg font-bold text-white tracking-wide">WF<span className="text-[#00f0ff]">Market</span></h1>
-                                <p className="text-[10px] uppercase tracking-widest text-[#ffd700] opacity-80 font-mono">Set Analyzer</p>
+                                <h1 className="text-lg font-bold text-white tracking-wide">WF<span className="text-[#e5c158]">Market</span></h1>
+                                <p className="text-[10px] uppercase tracking-widest text-[#2ebfcc] opacity-80 font-mono">Set Analyzer</p>
                             </motion.div>
                         )}
                     </AnimatePresence>
@@ -60,22 +56,22 @@ export function Sidebar() {
                         <Link key={path} to={path} className="group block">
                             <div
                                 className={cn(
-                                    'relative flex items-center h-12 rounded-lg transition-all duration-300',
+                                    'relative flex items-center h-12 transition-all duration-300',
                                     isActive
-                                        ? 'bg-[#00f0ff]/10 border border-[#00f0ff]/30 text-white shadow-[0_0_15px_rgba(0,240,255,0.1)]'
-                                        : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent'
+                                        ? 'bg-[#e5c158]/10 border border-[#e5c158]/20 text-white shadow-[0_0_15px_rgba(229,193,88,0.05)] wf-corner'
+                                        : 'text-gray-400 hover:text-white hover:bg-white/5 border border-transparent rounded-lg'
                                 )}
                             >
                                 {/* Active Indicator Line */}
                                 {isActive && (
                                     <motion.div
                                         layoutId="active-nav-indicator"
-                                        className="absolute left-0 top-1/4 bottom-1/4 w-1 bg-[#00f0ff] rounded-r-full shadow-[0_0_10px_rgba(0,240,255,0.8)]"
+                                        className="absolute left-0 top-2 bottom-2 w-1 bg-[#e5c158] shadow-[0_0_8px_rgba(229,193,88,0.4)]"
                                     />
                                 )}
 
                                 <div className="flex items-center w-full px-4">
-                                    <Icon className={cn("w-5 h-5 flex-shrink-0 transition-colors duration-300", isActive ? "text-[#00f0ff]" : "group-hover:text-[#ffd700]")} />
+                                    <Icon className={cn("w-5 h-5 flex-shrink-0 transition-colors duration-300", isActive ? "text-[#e5c158]" : "group-hover:text-[#2ebfcc]")} />
 
                                     <AnimatePresence mode="wait">
                                         {isExpanded && (

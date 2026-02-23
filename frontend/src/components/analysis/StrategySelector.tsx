@@ -1,11 +1,18 @@
-import { Shield, Scale, TrendingUp } from 'lucide-react';
+import { Shield, Scale, TrendingUp, Zap, Clock } from 'lucide-react';
 import { clsx } from 'clsx';
 import { motion } from 'framer-motion';
 import { SpotlightCard } from '../common/SpotlightCard';
-import type { StrategyType } from '../../api/types';
+import type { StrategyType, ExecutionMode } from '../../api/types';
 
 interface Strategy {
   type: StrategyType;
+  name: string;
+  description: string;
+  icon: React.ElementType;
+}
+
+interface ExecutionModeOption {
+  type: ExecutionMode;
   name: string;
   description: string;
   icon: React.ElementType;
@@ -32,15 +39,34 @@ const strategies: Strategy[] = [
   },
 ];
 
+const executionModes: ExecutionModeOption[] = [
+  {
+    type: 'instant',
+    name: 'Instant',
+    description: 'Fast execution using immediate fills',
+    icon: Zap,
+  },
+  {
+    type: 'patient',
+    name: 'Patient',
+    description: 'Higher margin using slower fills',
+    icon: Clock,
+  },
+];
+
 interface StrategySelectorProps {
   currentStrategy: StrategyType;
+  currentExecutionMode: ExecutionMode;
   onStrategyChange: (strategy: StrategyType) => void;
+  onExecutionModeChange: (executionMode: ExecutionMode) => void;
   loading?: boolean;
 }
 
 export function StrategySelector({
   currentStrategy,
+  currentExecutionMode,
   onStrategyChange,
+  onExecutionModeChange,
   loading = false,
 }: StrategySelectorProps) {
   return (
@@ -107,8 +133,60 @@ export function StrategySelector({
         })}
       </div>
 
+      <div className="mt-6 pt-4 border-t border-white/10">
+        <h4 className="text-[10px] uppercase tracking-widest text-[#00f0ff]/70 font-mono mb-3">
+          Fill Timing
+        </h4>
+        <div className="space-y-2">
+          {executionModes.map((mode) => {
+            const Icon = mode.icon;
+            const isSelected = currentExecutionMode === mode.type;
+
+            return (
+              <motion.button
+                key={mode.type}
+                whileHover={!loading ? { scale: 1.01, x: 3 } : {}}
+                whileTap={!loading ? { scale: 0.99 } : {}}
+                onClick={() => onExecutionModeChange(mode.type)}
+                disabled={loading}
+                className={clsx(
+                  'w-full p-3 rounded-lg border transition-all duration-300 text-left relative overflow-hidden group',
+                  isSelected
+                    ? 'border-[#00f0ff]/40 bg-[#00f0ff]/10 shadow-[0_0_12px_rgba(0,240,255,0.15)]'
+                    : 'border-white/10 bg-black/40 hover:border-[#00f0ff]/30',
+                  loading && 'opacity-50 cursor-not-allowed'
+                )}
+              >
+                {isSelected && (
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#00f0ff]/20 to-transparent pointer-events-none" />
+                )}
+
+                <div className="relative flex items-center space-x-3 z-10">
+                  <div className={clsx(
+                    'p-2 rounded-lg transition-colors duration-300',
+                    isSelected ? 'bg-[#00f0ff]/20 text-[#00f0ff]' : 'bg-white/5 text-gray-500 group-hover:text-white'
+                  )}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+
+                  <div>
+                    <p className={clsx(
+                      'font-mono text-xs font-bold tracking-wide uppercase',
+                      isSelected ? 'text-white' : 'text-gray-300 group-hover:text-white'
+                    )}>
+                      {mode.name}
+                    </p>
+                    <p className="text-[10px] text-gray-500 font-mono mt-1">{mode.description}</p>
+                  </div>
+                </div>
+              </motion.button>
+            );
+          })}
+        </div>
+      </div>
+
       <p className="text-[10px] uppercase font-mono tracking-widest text-[#00f0ff]/50 mt-6 pt-4 border-t border-white/5 line-clamp-2 leading-relaxed">
-        Strategy selection mutates profitability rendering vectors and risk tolerance thresholds.
+        Strategy and timing selections mutate profitability vectors, liquidity weighting, and risk tolerance thresholds.
       </p>
     </SpotlightCard>
   );
