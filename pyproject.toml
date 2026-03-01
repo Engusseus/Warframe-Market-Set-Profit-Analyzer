@@ -1,0 +1,14 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["backend/app", "backend/tests"]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+ignore = ["E501", "F401", "F841"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true

@@ -1,0 +1,17 @@
+{
+  "name": "warframe-market-set-profit-analyzer",
+  "private": true,
+  "scripts": {
+    "start": "npm run dev",
+    "dev": "concurrently --kill-others-on-fail --names backend,frontend --prefix-colors cyan,magenta \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && bash -lc 'if [ -x venv/bin/uvicorn ]; then venv/bin/uvicorn app.main:app --reload; elif [ -x venv/bin/python ]; then venv/bin/python -m uvicorn app.main:app --reload; else uvicorn app.main:app --reload; fi'",
+    "dev:frontend": "cd frontend && npm run dev",
+    "generate:api-types": "npm --prefix frontend run generate:api-types",
+    "generate:api-types:check": "npm --prefix frontend run generate:api-types:check",
+    "lint:backend": "cd backend && bash -lc 'if [ -x venv/bin/ruff ]; then venv/bin/ruff check app tests; else ruff check app tests; fi'",
+    "format:backend": "cd backend && bash -lc 'if [ -x venv/bin/ruff ]; then venv/bin/ruff format app tests && venv/bin/ruff check --fix app tests; else ruff format app tests && ruff check --fix app tests; fi'"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

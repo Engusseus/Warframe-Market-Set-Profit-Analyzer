@@ -1,4 +1,4 @@
-import { cn } from '../common/SpotlightCard';
+import { cn } from '../../utils/cn';
 import type { ScoredSet } from '../../api/types';
 
 interface ScoreBreakdownProps {

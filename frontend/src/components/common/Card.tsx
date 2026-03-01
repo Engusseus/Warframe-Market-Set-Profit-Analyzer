@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { motion } from 'framer-motion';
-import { cn } from './SpotlightCard';
+import { cn } from '../../utils/cn';
 
 interface CardProps {
   children: ReactNode;

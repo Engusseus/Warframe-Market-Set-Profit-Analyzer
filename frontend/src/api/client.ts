@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Use relative URL '/api' for production (Docker with nginx proxy)
-// Use VITE_API_URL env variable for development (e.g., http://localhost:8000/api)
+// Use relative URL '/api' when the frontend and API share an origin.
+// Use VITE_API_URL for local split-host development (e.g., http://localhost:8000/api).
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Debug mode - log API configuration on startup

@@ -13,8 +13,3 @@ aiosqlite>=0.20.0
 # Utilities
 python-dotenv>=1.0.0
 python-multipart>=0.0.15
-
-# Development/Testing
-pytest>=8.0.0
-pytest-asyncio>=0.24.0
-pytest-cov>=5.0.0

@@ -88,7 +88,41 @@ async def get_analysis(
     service = get_analysis_service()
 
     try:
-        # Run full analysis with strategy
+        if not force_refresh and not test_mode:
+            latest = await service.get_latest_analysis()
+            if latest is not None:
+                latest_strategy = str(getattr(latest.strategy, "value", latest.strategy)).strip().lower()
+                latest_execution_mode = str(getattr(latest.execution_mode, "value", latest.execution_mode)).strip().lower()
+
+                if (
+                    latest_strategy == strategy_type.value
+                    and latest_execution_mode == execution_mode_type.value
+                ):
+                    logger.info(
+                        "Returning latest background analysis run_id=%s",
+                        latest.run_id,
+                    )
+                    return latest
+
+                logger.info(
+                    "Latest analysis run_id=%s params do not match request "
+                    "(cached strategy=%s, cached execution_mode=%s, requested strategy=%s, requested execution_mode=%s); "
+                    "running analysis for requested params",
+                    latest.run_id,
+                    latest_strategy,
+                    latest_execution_mode,
+                    strategy_type.value,
+                    execution_mode_type.value,
+                )
+            else:
+                status = service.get_status()
+                if status["status"] == "running":
+                    raise HTTPException(
+                        status_code=404,
+                        detail="No completed analysis available yet. Background polling is still running."
+                    )
+
+        # Explicit refresh/test-mode still supports on-demand runs.
         result = await service.run_full_analysis(
             strategy=strategy_type,
             execution_mode=execution_mode_type,
@@ -97,6 +131,8 @@ async def get_analysis(
         )
         logger.info(f"Analysis completed successfully, returning {result.total_sets} sets")
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Analysis request failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -175,14 +211,15 @@ async def stream_analysis_progress(request: Request):
     """Stream analysis progress via Server-Sent Events (SSE).
 
     Returns real-time progress updates as the analysis runs.
-    Connection stays open until analysis completes or client disconnects.
+    Connection stays open for live updates across continuous background polling
+    until the client disconnects.
     """
     service = get_analysis_service()
 
     async def event_generator():
         """Generate SSE events for analysis progress."""
-        last_progress = -1
-        last_message = ""
+        last_payload: Optional[str] = None
+        yield "retry: 1000\n\n"
 
         while True:
             # Check if client disconnected
@@ -190,29 +227,30 @@ async def stream_analysis_progress(request: Request):
                 break
 
             status = service.get_status()
-            current_progress = status["progress"]
-            current_message = status["message"]
-            current_status = status["status"]
+            payload = json.dumps({
+                "status": status["status"],
+                "progress": status["progress"],
+                "message": status["message"],
+                "run_id": status["run_id"],
+                "error": status.get("error")
+            })
 
-            # Only send updates when there's a change
-            if current_progress != last_progress or current_message != last_message or current_status in ["completed", "error"]:
-                data = json.dumps({
-                    "status": current_status,
-                    "progress": current_progress,
-                    "message": current_message,
-                    "run_id": status["run_id"],
-                    "error": status.get("error")
-                })
-                yield f"data: {data}\n\n"
+            if payload != last_payload:
+                yield f"data: {payload}\n\n"
+                last_payload = payload
+            else:
+                # Keep the stream active through proxies when status is unchanged.
+                yield ": ping\n\n"
 
-                last_progress = current_progress
-                last_message = current_message
+            wait_for_update = getattr(service, "wait_for_status_update", None)
+            if callable(wait_for_update):
+                try:
+                    await wait_for_update(timeout=1.0)
+                    continue
+                except Exception:
+                    pass
 
-                if current_status in ["completed", "error"]:
-                    break
-
-            # Poll interval - check status every 100ms
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(1.0)
 
     return StreamingResponse(
         event_generator(),
@@ -220,7 +258,7 @@ async def stream_analysis_progress(request: Request):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
+            "X-Accel-Buffering": "no",  # Disable reverse-proxy buffering
         }
     )
 

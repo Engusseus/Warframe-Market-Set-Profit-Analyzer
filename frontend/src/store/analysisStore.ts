@@ -9,6 +9,7 @@ import type {
 } from '../api/types';
 
 type SortBy = 'score' | 'profit' | 'volume' | 'roi' | 'trend' | 'risk' | 'liquidity';
+type LiveConnectionState = 'monitoring' | 'connecting' | 'connected' | 'disconnected';
 
 interface AnalysisState {
   // Data
@@ -19,6 +20,7 @@ interface AnalysisState {
   // Progress tracking
   progress: number | null;
   progressMessage: string | null;
+  liveConnectionState: LiveConnectionState;
 
   // Strategy
   strategy: StrategyType;
@@ -37,6 +39,7 @@ interface AnalysisState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   setProgress: (progress: number | null, message?: string | null) => void;
+  setLiveConnectionState: (state: LiveConnectionState) => void;
   setStrategy: (strategy: StrategyType) => void;
   setExecutionMode: (executionMode: ExecutionMode) => void;
   setWeights: (profit: number, volume: number) => void;
@@ -51,6 +54,7 @@ const initialState = {
   error: null,
   progress: null,
   progressMessage: null,
+  liveConnectionState: 'monitoring' as LiveConnectionState,
   strategy: 'balanced' as StrategyType,
   executionMode: 'instant' as ExecutionMode,
   weights: { strategy: 'balanced' as StrategyType, profit_weight: 1.0, volume_weight: 1.2 },
@@ -84,6 +88,8 @@ export const useAnalysisStore = create<AnalysisState>()(
       setError: (error) => set({ error, isLoading: false, progress: null, progressMessage: null }),
 
       setProgress: (progress, message = null) => set({ progress, progressMessage: message }),
+
+      setLiveConnectionState: (liveConnectionState) => set({ liveConnectionState }),
 
       setStrategy: (strategy) => set({ strategy }),
 

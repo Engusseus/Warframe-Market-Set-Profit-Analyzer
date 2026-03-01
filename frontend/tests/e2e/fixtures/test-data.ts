@@ -23,10 +23,9 @@ export const ROUTES = {
 
 export const SELECTORS = {
   // Dashboard
-  RUN_ANALYSIS_BUTTON: 'button:has-text("Run Analysis"), button:has-text("Analyze Market")',
-  TEST_MODE_CHECKBOX: 'input[type="checkbox"]',
+  LIVE_STATUS_BADGE: 'text=Live Updating',
   PROGRESS_BAR: '[role="progressbar"], .bg-mint',
-  VIEW_RESULTS_BUTTON: 'button:has-text("View Results"), button:has-text("View Analysis Results")',
+  VIEW_RESULTS_BUTTON: 'button:has-text("Access Data Grid"), a:has-text("Access Data Grid")',
 
   // Analysis
   PROFIT_TABLE: 'table',

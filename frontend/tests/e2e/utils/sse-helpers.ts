@@ -8,9 +8,8 @@ export async function waitForAnalysisComplete(
   page: Page,
   timeoutMs = 120000
 ): Promise<void> {
-  // Wait for either "View Results" button to appear or an error
   await expect(
-    page.locator('button:has-text("View Results"), button:has-text("View Analysis Results"), .text-profit-negative')
+    page.locator('a:has-text("Access Data Grid"), button:has-text("Access Data Grid"), .text-profit-negative')
   ).toBeVisible({ timeout: timeoutMs });
 }
 
@@ -34,11 +33,10 @@ export async function waitForProgress(
       }
     }
 
-    // Check if analysis completed
-    const viewResultsButton = page.locator(
-      'button:has-text("View Results"), button:has-text("View Analysis Results")'
+    const accessDataGrid = page.locator(
+      'a:has-text("Access Data Grid"), button:has-text("Access Data Grid")'
     );
-    if (await viewResultsButton.isVisible().catch(() => false)) {
+    if (await accessDataGrid.isVisible().catch(() => false)) {
       return;
     }
 
@@ -52,18 +50,18 @@ export async function waitForProgress(
  * Check if analysis is currently running.
  */
 export async function isAnalysisRunning(page: Page): Promise<boolean> {
-  const runningButton = page.locator('button:has-text("Running")');
-  return await runningButton.isVisible().catch(() => false);
+  const progressState = page.locator('text=/Processing|Fetching|Calculating|Saving/i');
+  return await progressState.first().isVisible().catch(() => false);
 }
 
 /**
  * Check if analysis has completed (results available).
  */
 export async function isAnalysisComplete(page: Page): Promise<boolean> {
-  const viewResultsButton = page.locator(
-    'button:has-text("View Results"), button:has-text("View Analysis Results")'
+  const accessDataGrid = page.locator(
+    'a:has-text("Access Data Grid"), button:has-text("Access Data Grid")'
   );
-  return await viewResultsButton.isVisible().catch(() => false);
+  return await accessDataGrid.isVisible().catch(() => false);
 }
 
 /**

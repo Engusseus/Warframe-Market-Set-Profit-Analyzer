@@ -34,12 +34,11 @@ class WarframeMarketService:
         self.timeout = settings.request_timeout
 
         self.rate_limiter = rate_limiter or RateLimiter(
-            max_requests=settings.rate_limit_requests,
-            time_window=settings.rate_limit_window
+            max_requests=3,
+            time_window=1.0
         )
-        # Keep worker concurrency aligned with configured request burst size.
-        # The rate limiter still enforces global API request limits.
-        self.max_concurrent_requests = max(1, settings.rate_limit_requests)
+        # Keep worker concurrency aligned with strict global API cap.
+        self.max_concurrent_requests = 3
         self._client = http_client
         self._owns_client = http_client is None
 
