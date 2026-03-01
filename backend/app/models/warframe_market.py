@@ -28,7 +28,7 @@ class WFMItemListResponse(BaseModel):
 
 class WFMOrder(BaseModel):
     platinum: float
-    order_type: str
+    order_type: str = Field(alias="type")
     user: Dict[str, Any]
     quantity: Optional[float] = 1
     
