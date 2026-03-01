@@ -222,6 +222,24 @@ export function Analysis() {
                 </div>
               </motion.div>
             </motion.div>
+          ) : error ? (
+            /* Error State */
+            <motion.div
+              key="error-state"
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+              className="col-span-full"
+            >
+              <Card className="text-center py-20 border-white/5 opacity-50 relative overflow-hidden group">
+                <div className="absolute inset-0 bg-[linear-gradient(to_right,#ff33661a_1px,transparent_1px),linear-gradient(to_bottom,#ff33661a_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] z-0" />
+                <div className="relative z-10">
+                  <Radar className="w-16 h-16 text-[#ff3366]/50 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500 animate-pulse" />
+                  <h3 className="text-xl font-mono uppercase tracking-widest text-[#ff3366]/70 mb-2">Network Uplink Failure</h3>
+                  <p className="text-gray-500 font-mono text-sm max-w-sm mx-auto">
+                    The analysis request failed or encountered a critical server error. Please retry or check the logs.
+                  </p>
+                </div>
+              </Card>
+            </motion.div>
           ) : (
             /* Standby State */
             <motion.div

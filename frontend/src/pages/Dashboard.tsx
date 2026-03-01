@@ -295,7 +295,7 @@ export function Dashboard() {
 
         {/* Empty State / Standby Mode */}
         <AnimatePresence>
-          {!currentAnalysis && !isLoading && (
+          {!currentAnalysis && !isLoading && !error && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}

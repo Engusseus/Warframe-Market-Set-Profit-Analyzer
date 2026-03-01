@@ -86,9 +86,8 @@ export function History() {
                     <button
                       key={run.run_id}
                       onClick={() => handleSelectRun(run.run_id)}
-                      className={`w-full p-4 text-left hover:bg-dark-hover transition-colors flex items-center justify-between ${
-                        selectedRun?.run_id === run.run_id ? 'bg-dark-hover border-l-2 border-mint' : ''
-                      }`}
+                      className={`w-full p-4 text-left hover:bg-dark-hover transition-colors flex items-center justify-between ${selectedRun?.run_id === run.run_id ? 'bg-dark-hover border-l-2 border-mint' : ''
+                        }`}
                     >
                       <div>
                         <p className="text-sm text-gray-300 flex items-center space-x-2">
@@ -205,9 +204,12 @@ export function History() {
 
                   {/* Sets Table */}
                   <div>
-                    <h4 className="text-sm font-medium text-gray-400 uppercase mb-3">
-                      Set Profits
+                    <h4 className="text-sm font-medium text-gray-400 uppercase mb-1">
+                      Set Profits (Instant Fill Strategy)
                     </h4>
+                    <p className="text-xs text-gray-500 mb-3">
+                      History explicitly records raw Instant-fill profits. Load in Analysis to recalculate yields with Patient or Aggressive strategies.
+                    </p>
                     <div className="max-h-96 overflow-y-auto rounded-lg border border-dark-border">
                       <table className="w-full">
                         <thead className="bg-dark-hover sticky top-0">
