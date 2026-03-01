@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { clearStorage } from '../utils/storage-helpers';
-import { waitForAnalysisComplete } from '../utils/sse-helpers';
-import { ROUTES, TIMEOUTS } from '../fixtures/test-data';
+import { ROUTES } from '../fixtures/test-data';
 
 test.describe('History Page', () => {
   test.beforeEach(async ({ page }) => {
@@ -15,29 +14,22 @@ test.describe('History Page', () => {
   });
 
   test('should display run list after analysis', async ({ page }) => {
-    // First run an analysis to have history
     await page.goto(ROUTES.DASHBOARD);
     await clearStorage(page);
-
-    const testModeCheckbox = page.locator('input[type="checkbox"]').first();
-    if (await testModeCheckbox.isVisible()) {
-      await testModeCheckbox.check();
-    }
-
-    const runButton = page.locator('button').filter({ hasText: /Run Analysis|Analyze/i }).first();
-    if (await runButton.isVisible()) {
-      await runButton.click();
-      await waitForAnalysisComplete(page, TIMEOUTS.ANALYSIS);
-    }
+    await page.waitForTimeout(1500);
 
     // Navigate to history
     await page.goto(ROUTES.HISTORY);
     await page.waitForLoadState('networkidle');
 
-    // Should have at least one run entry
+    // Should render run list UI even when backend is unavailable.
     const runEntry = page.locator('button, div').filter({ hasText: /sets|Run #|profit/i });
+    const noRuns = page.locator('text=/No runs yet/i');
+    const listHeader = page.locator('text=/Analysis Runs/i');
     const hasRuns = await runEntry.first().isVisible().catch(() => false);
-    expect(hasRuns || true).toBe(true); // May have no data on fresh db
+    const hasNoRuns = await noRuns.first().isVisible().catch(() => false);
+    const hasHeader = await listHeader.first().isVisible().catch(() => false);
+    expect(hasRuns || hasNoRuns || hasHeader).toBe(true);
   });
 
   test('should show pagination controls', async ({ page }) => {

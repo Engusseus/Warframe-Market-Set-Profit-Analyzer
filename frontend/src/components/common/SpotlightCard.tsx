@@ -1,13 +1,8 @@
 import React, { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { cn } from '../../utils/cn';
 
 import type { HTMLMotionProps } from 'framer-motion';
-
-export function cn(...inputs: ClassValue[]) {
-    return twMerge(clsx(inputs));
-}
 
 interface SpotlightCardProps extends Omit<HTMLMotionProps<"div">, "children" | "className" | "onAnimationStart" | "onDragStart" | "onDragEnd" | "onDrag"> {
     children: React.ReactNode;

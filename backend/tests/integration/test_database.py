@@ -327,13 +327,15 @@ class TestSaveFullAnalysis:
         await test_database.save_full_analysis(
             run_id=run_id,
             scored_data=scored_data,
-            strategy="balanced"
+            strategy="balanced",
+            execution_mode="patient",
         )
 
         # Retrieve and verify
         result = await test_database.get_full_analysis(run_id)
         assert result is not None
         assert result['strategy'] == 'balanced'
+        assert result['execution_mode'] == 'patient'
         assert len(result['sets']) == 1
         assert result['sets'][0]['set_slug'] == 'test_set'
 

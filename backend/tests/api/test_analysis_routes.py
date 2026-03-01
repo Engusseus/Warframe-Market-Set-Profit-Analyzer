@@ -21,10 +21,22 @@ def fake_analysis_service(monkeypatch):
         def __init__(self):
             self.run_calls = []
             self.rescore_calls = []
+            self.latest_analysis = None
+            self.status_response = {
+                "status": "idle",
+                "progress": 0,
+                "message": "",
+                "run_id": None,
+                "error": None,
+            }
 
-        async def run_full_analysis(self, **kwargs):
-            self.run_calls.append(kwargs)
-            mode = kwargs.get("execution_mode", ExecutionMode.INSTANT)
+        def build_analysis_response(
+            self,
+            run_id=1,
+            strategy=StrategyType.BALANCED,
+            execution_mode=ExecutionMode.INSTANT,
+        ):
+            mode = execution_mode
             if isinstance(mode, str):
                 mode = ExecutionMode(mode)
 
@@ -46,25 +58,30 @@ def fake_analysis_service(monkeypatch):
                 composite_score=1.0,
             )
             return AnalysisResponse(
-                run_id=1,
+                run_id=run_id,
                 timestamp=datetime.now(),
                 sets=[scored],
                 total_sets=1,
                 profitable_sets=1,
                 weights=WeightsConfig(),
-                strategy=StrategyType.BALANCED,
+                strategy=strategy,
                 execution_mode=mode,
                 cached=False,
             )
 
+        async def run_full_analysis(self, **kwargs):
+            self.run_calls.append(kwargs)
+            strategy = kwargs.get("strategy", StrategyType.BALANCED)
+            if hasattr(strategy, "value"):
+                strategy = StrategyType(strategy.value)
+            mode = kwargs.get("execution_mode", ExecutionMode.INSTANT)
+            return self.build_analysis_response(strategy=strategy, execution_mode=mode)
+
         def get_status(self):
-            return {
-                "status": "idle",
-                "progress": 0,
-                "message": "",
-                "run_id": None,
-                "error": None,
-            }
+            return self.status_response
+
+        async def get_latest_analysis(self):
+            return self.latest_analysis
 
         async def recalculate_scores(self, strategy, execution_mode=None, **kwargs):
             self.rescore_calls.append({
@@ -233,6 +250,78 @@ class TestAnalysisExecutionMode:
         assert data["execution_mode"] == "patient"
         assert fake_analysis_service.run_calls
         assert fake_analysis_service.run_calls[-1]["execution_mode"] == ExecutionMode.PATIENT
+
+
+class TestAnalysisCachedResults:
+    """Tests for GET /api/analysis cached-result semantics."""
+
+    @pytest.mark.api
+    @pytest.mark.asyncio
+    async def test_returns_cached_result_when_params_match(
+        self,
+        async_client: AsyncClient,
+        fake_analysis_service,
+    ):
+        fake_analysis_service.latest_analysis = fake_analysis_service.build_analysis_response(
+            run_id=77,
+            strategy=StrategyType.AGGRESSIVE,
+            execution_mode=ExecutionMode.PATIENT,
+        )
+
+        response = await async_client.get(
+            "/api/analysis",
+            params={"strategy": "aggressive", "execution_mode": "patient"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["run_id"] == 77
+        assert fake_analysis_service.run_calls == []
+
+    @pytest.mark.api
+    @pytest.mark.asyncio
+    async def test_ignores_cached_result_when_params_mismatch(
+        self,
+        async_client: AsyncClient,
+        fake_analysis_service,
+    ):
+        fake_analysis_service.latest_analysis = fake_analysis_service.build_analysis_response(
+            run_id=78,
+            strategy=StrategyType.BALANCED,
+            execution_mode=ExecutionMode.INSTANT,
+        )
+
+        response = await async_client.get(
+            "/api/analysis",
+            params={"strategy": "aggressive", "execution_mode": "patient"},
+        )
+
+        assert response.status_code == 200
+        assert fake_analysis_service.run_calls
+        assert fake_analysis_service.run_calls[-1]["strategy"].value == "aggressive"
+        assert fake_analysis_service.run_calls[-1]["execution_mode"] == ExecutionMode.PATIENT
+
+    @pytest.mark.api
+    @pytest.mark.asyncio
+    async def test_returns_404_not_500_when_running_without_completed_analysis(
+        self,
+        async_client: AsyncClient,
+        fake_analysis_service,
+    ):
+        fake_analysis_service.latest_analysis = None
+        fake_analysis_service.status_response = {
+            "status": "running",
+            "progress": 10,
+            "message": "Background polling",
+            "run_id": None,
+            "error": None,
+        }
+
+        response = await async_client.get("/api/analysis")
+
+        assert response.status_code == 404
+        assert "No completed analysis available yet" in response.json()["detail"]
+        assert fake_analysis_service.run_calls == []
 
     @pytest.mark.api
     @pytest.mark.asyncio

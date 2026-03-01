@@ -2,12 +2,50 @@
 
 Extracted from main.py lines 431-444 and 1153-1165.
 """
+from collections import OrderedDict
+from copy import deepcopy
 import hashlib
 import json
 import os
 import random
+from threading import Lock
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+from ..config import get_settings
+
+
+class _InMemoryLRUCache:
+    """Minimal in-memory LRU cache for local runtime fallback."""
+
+    def __init__(self, max_entries: int = 128):
+        self.max_entries = max(1, max_entries)
+        self._entries: "OrderedDict[str, Dict[str, Any]]" = OrderedDict()
+        self._lock = Lock()
+
+    def configure(self, max_entries: int) -> None:
+        """Update cache capacity and evict overflow entries."""
+        with self._lock:
+            self.max_entries = max(1, max_entries)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """Get cached value and move key to most-recently-used."""
+        with self._lock:
+            value = self._entries.get(key)
+            if value is None:
+                return None
+            self._entries.move_to_end(key)
+            return deepcopy(value)
+
+    def set(self, key: str, value: Dict[str, Any]) -> None:
+        """Set cached value and evict least-recently-used entries."""
+        with self._lock:
+            self._entries[key] = deepcopy(value)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self.max_entries:
+                self._entries.popitem(last=False)
 
 
 def calculate_hash(data: Any) -> str:
@@ -27,17 +65,26 @@ def calculate_hash(data: Any) -> str:
 class CacheManager:
     """Manager for prime sets cache with SHA-256 validation."""
 
+    _local_lru_cache = _InMemoryLRUCache()
+    _local_cache_key = "prime_sets_cache"
+
     def __init__(self, cache_dir: str = "cache"):
         """Initialize cache manager.
 
         Args:
             cache_dir: Directory for cache files
         """
+        settings = get_settings()
         self.cache_dir = cache_dir
         self.cache_file = os.path.join(cache_dir, "prime_sets_cache.json")
+        self.cache_backend = settings.get_cache_backend()
+        self.use_in_memory_cache = self.cache_backend == "memory"
 
-        # Ensure cache directory exists
-        os.makedirs(cache_dir, exist_ok=True)
+        if self.use_in_memory_cache:
+            self._local_lru_cache.configure(settings.cache_lru_max_entries)
+        else:
+            # Ensure cache directory exists
+            os.makedirs(cache_dir, exist_ok=True)
 
     def load_cache(self) -> Dict[str, Any]:
         """Load cached data from file.
@@ -45,6 +92,9 @@ class CacheManager:
         Returns:
             Cached data dictionary, or empty dict if cache doesn't exist
         """
+        if self.use_in_memory_cache:
+            return self._local_lru_cache.get(self._local_cache_key) or {}
+
         if os.path.exists(self.cache_file):
             try:
                 with open(self.cache_file, 'r', encoding='utf-8') as f:
@@ -59,6 +109,10 @@ class CacheManager:
         Args:
             data: Data to cache
         """
+        if self.use_in_memory_cache:
+            self._local_lru_cache.set(self._local_cache_key, data)
+            return
+
         try:
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)

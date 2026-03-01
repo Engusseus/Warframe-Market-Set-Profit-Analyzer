@@ -13,6 +13,7 @@ interface UseAnalysisProgressOptions {
   onComplete?: (update: ProgressUpdate) => void;
   onError?: (error: string) => void;
   onConnected?: () => void;
+  onDisconnected?: () => void;
 }
 
 /**
@@ -20,14 +21,14 @@ interface UseAnalysisProgressOptions {
  *
  * @param isActive - Whether to actively listen for progress updates
  * @param options - Callbacks for progress updates
- * @returns Object with current connection status
  */
 export function useAnalysisProgress(
   isActive: boolean,
   options: UseAnalysisProgressOptions = {}
 ) {
   const eventSourceRef = useRef<EventSource | null>(null);
-  const { onProgress, onComplete, onError, onConnected } = options;
+  const closedIntentionallyRef = useRef(false);
+  const { onProgress, onComplete, onError, onConnected, onDisconnected } = options;
 
   const cleanup = useCallback(() => {
     if (eventSourceRef.current) {
@@ -39,6 +40,7 @@ export function useAnalysisProgress(
   useEffect(() => {
     // Only connect when analysis is active
     if (!isActive) {
+      closedIntentionallyRef.current = true;
       cleanup();
       return;
     }
@@ -47,6 +49,13 @@ export function useAnalysisProgress(
     const url = `${API_BASE_URL}/analysis/progress`;
     const eventSource = new EventSource(url);
     eventSourceRef.current = eventSource;
+    closedIntentionallyRef.current = false;
+
+    const closeStream = () => {
+      closedIntentionallyRef.current = true;
+      cleanup();
+      onDisconnected?.();
+    };
 
     eventSource.onopen = () => {
       onConnected?.();
@@ -62,10 +71,10 @@ export function useAnalysisProgress(
         // Check for completion or error
         if (data.status === 'completed') {
           onComplete?.(data);
-          // Don't cleanup on completion, let parent control lifecycle
+          closeStream();
         } else if (data.status === 'error') {
           onError?.(data.error || 'Analysis failed');
-          // Don't cleanup on error either, let parent retry if needed
+          closeStream();
         }
       } catch (e) {
         console.error('[SSE] Failed to parse progress update:', e);
@@ -73,7 +82,12 @@ export function useAnalysisProgress(
     };
 
     eventSource.onerror = (event) => {
+      if (closedIntentionallyRef.current) {
+        return;
+      }
+
       console.error('[SSE] Connection error:', event);
+      onDisconnected?.();
       // Only trigger error callback if we weren't expecting to close
       if (eventSource.readyState === EventSource.CLOSED) {
         onError?.('Connection to progress stream lost');
@@ -82,10 +96,10 @@ export function useAnalysisProgress(
     };
 
     // Cleanup on unmount or when isActive changes
-    return cleanup;
-  }, [isActive, onProgress, onComplete, onError, onConnected, cleanup]);
+    return () => {
+      closedIntentionallyRef.current = true;
+      cleanup();
+    };
+  }, [isActive, onProgress, onComplete, onError, onConnected, onDisconnected, cleanup]);
 
-  return {
-    isConnected: eventSourceRef.current?.readyState === EventSource.OPEN,
-  };
 }

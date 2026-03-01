@@ -1,18 +1,38 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Database, Clock, TrendingUp, Play, Loader2, ArrowRight, BarChart2 } from 'lucide-react';
+import {
+  Database,
+  Clock,
+  TrendingUp,
+  ArrowRight,
+  BarChart2,
+  Activity,
+  WifiOff,
+  Loader2,
+} from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import type { Variants } from 'framer-motion';
-import { clsx } from 'clsx';
-import { runAnalysis, getStats } from '../api/analysis';
+import {
+  getStats,
+  getHistory,
+  getHistoricalAnalysis,
+  getAnalysisStatus,
+} from '../api/analysis';
 import { useAnalysisStore } from '../store/analysisStore';
 import { useAnalysisProgress } from '../hooks/useAnalysisProgress';
 import { Layout } from '../components/layout/Layout';
 import { StatCard, Card } from '../components/common/Card';
 import { Button } from '../components/common/Button';
 import { SpotlightCard } from '../components/common/SpotlightCard';
-import type { ExecutionMode } from '../api/types';
+
+type ProgressStreamUpdate = {
+  status: 'idle' | 'running' | 'completed' | 'error';
+  progress?: number | null;
+  message?: string | null;
+  run_id?: number | null;
+  error?: string | null;
+};
 
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -42,63 +62,199 @@ export function Dashboard() {
     setLoading,
     error,
     setError,
-    strategy,
-    executionMode,
-    setExecutionMode,
     progress,
     progressMessage,
     setProgress,
+    liveConnectionState,
+    setLiveConnectionState,
   } = useAnalysisStore();
+  const [isHydrating, setIsHydrating] = useState(true);
+  const lastLoadedRunIdRef = useRef<number | null>(currentAnalysis?.run_id ?? null);
 
-  const [testMode, setTestMode] = useState(false);
-  const [isInitiating, setIsInitiating] = useState(false);
-
-  const { data: stats } = useQuery({
+  const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['stats'],
     queryFn: getStats,
     staleTime: 60000,
   });
 
-  const handleProgress = useCallback((update: { progress: number | null; message: string | null }) => {
-    setProgress(update.progress, update.message);
-  }, [setProgress]);
-
-  const executeAnalysis = useCallback(async () => {
-    setIsInitiating(false);
-    setProgress(0, 'Initialize System Uplink...');
-
-    try {
-      const result = await runAnalysis(strategy, executionMode, false, testMode);
-      setAnalysis(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Uplink failed');
-    } finally {
-      setLoading(false);
-    }
-  }, [strategy, executionMode, setAnalysis, setError, setLoading, setProgress, testMode]);
-
-  const handleConnected = useCallback(() => {
-    if (isInitiating) {
-      executeAnalysis();
-    }
-  }, [isInitiating, executeAnalysis]);
-
-  const handleError = useCallback((err: string) => {
-    console.error('[Terminal] Uplink Error:', err);
-  }, []);
-
-  useAnalysisProgress(isLoading || isInitiating, {
-    onProgress: handleProgress,
-    onConnected: handleConnected,
-    onError: handleError
+  const { data: analysisStatus } = useQuery({
+    queryKey: ['analysis-status'],
+    queryFn: getAnalysisStatus,
+    refetchInterval: 5000,
+    staleTime: 0,
   });
 
-  const handleRunAnalysis = () => {
+  const loadLatestAnalysis = useCallback(async (preferredRunId?: number | null) => {
+    try {
+      const history = await getHistory(1, 1);
+      const latestRunId = history.runs[0]?.run_id ?? null;
+      const runIdsToTry = [preferredRunId, latestRunId]
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+        .filter((value, index, arr) => arr.indexOf(value) === index);
+
+      if (!runIdsToTry.length) {
+        setError(null);
+        return;
+      }
+
+      for (const runId of runIdsToTry) {
+        try {
+          const analysis = await getHistoricalAnalysis(runId);
+          setAnalysis(analysis);
+          lastLoadedRunIdRef.current = analysis.run_id ?? runId;
+          setError(null);
+          await refetchStats();
+          return;
+        } catch (runLoadError) {
+          console.warn(`[Dashboard] Unable to load analysis run ${runId}`, runLoadError);
+        }
+      }
+
+      setError('Unable to load the latest completed analysis run.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load analysis history');
+    }
+  }, [setAnalysis, setError, refetchStats]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const initializeDashboard = async () => {
+      setIsHydrating(true);
+      await loadLatestAnalysis();
+      if (isMounted) {
+        setIsHydrating(false);
+      }
+    };
+
+    void initializeDashboard();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [loadLatestAnalysis]);
+
+  useEffect(() => {
+    if (!analysisStatus) {
+      return;
+    }
+
+    if (analysisStatus.status === 'running') {
+      setError(null);
+      setLoading(true);
+      setProgress(analysisStatus.progress ?? null, analysisStatus.message ?? null);
+      return;
+    }
+
+    if (analysisStatus.status === 'error') {
+      setLoading(false);
+      setProgress(null, null);
+      setError(analysisStatus.message || 'Analysis failed');
+      return;
+    }
+
+    setLoading(false);
+
+    if (analysisStatus.status === 'completed') {
+      setError(null);
+      setProgress(100, analysisStatus.message || 'Analysis complete');
+
+      if (
+        typeof analysisStatus.run_id === 'number' &&
+        analysisStatus.run_id !== lastLoadedRunIdRef.current
+      ) {
+        void loadLatestAnalysis(analysisStatus.run_id);
+      }
+      return;
+    }
+
+    setProgress(null, null);
+  }, [analysisStatus, setLoading, setProgress, setError, loadLatestAnalysis]);
+
+  const handleProgress = useCallback((update: ProgressStreamUpdate) => {
+    if (update.status !== 'running') {
+      return;
+    }
+
     setError(null);
     setLoading(true);
-    setProgress(0, 'Establishing Secure Connection...');
-    setIsInitiating(true);
-  };
+    setProgress(update.progress ?? null, update.message ?? null);
+  }, [setError, setLoading, setProgress]);
+
+  const handleComplete = useCallback((update: ProgressStreamUpdate) => {
+    setError(null);
+    setLoading(false);
+    setProgress(100, update.message || 'Analysis complete');
+
+    if (typeof update.run_id === 'number' && update.run_id !== lastLoadedRunIdRef.current) {
+      void loadLatestAnalysis(update.run_id);
+    }
+  }, [setError, setLoading, setProgress, loadLatestAnalysis]);
+
+  const handleError = useCallback((streamError: string) => {
+    console.error('[Dashboard] Progress stream error:', streamError);
+    setLiveConnectionState('disconnected');
+  }, [setLiveConnectionState]);
+
+  const isStreamingProgress = analysisStatus?.status === 'running';
+
+  const handleConnected = useCallback(() => {
+    setLiveConnectionState('connected');
+  }, [setLiveConnectionState]);
+
+  const handleDisconnected = useCallback(() => {
+    if (isStreamingProgress) {
+      setLiveConnectionState('disconnected');
+    }
+  }, [isStreamingProgress, setLiveConnectionState]);
+
+  useAnalysisProgress(isStreamingProgress, {
+    onProgress: handleProgress,
+    onComplete: handleComplete,
+    onError: handleError,
+    onConnected: handleConnected,
+    onDisconnected: handleDisconnected,
+  });
+
+  useEffect(() => {
+    if (!isStreamingProgress) {
+      if (liveConnectionState !== 'monitoring') {
+        setLiveConnectionState('monitoring');
+      }
+      return;
+    }
+
+    if (liveConnectionState === 'monitoring') {
+      setLiveConnectionState('connecting');
+    }
+  }, [isStreamingProgress, liveConnectionState, setLiveConnectionState]);
+
+  const liveStatusConfig = {
+    monitoring: {
+      label: 'Live Updating',
+      detail: 'Monitoring for new runs',
+      badgeClass: 'bg-[#00f0ff]/10 border-[#00f0ff]/30 text-[#00f0ff]',
+      dotClass: 'bg-[#00f0ff]',
+    },
+    connecting: {
+      label: 'Live Updating',
+      detail: 'Connecting to progress stream',
+      badgeClass: 'bg-[#e5c158]/10 border-[#e5c158]/30 text-[#e5c158]',
+      dotClass: 'bg-[#e5c158]',
+    },
+    connected: {
+      label: 'Live Updating',
+      detail: 'Streaming analysis progress',
+      badgeClass: 'bg-[#00ffaa]/10 border-[#00ffaa]/30 text-[#00ffaa]',
+      dotClass: 'bg-[#00ffaa]',
+    },
+    disconnected: {
+      label: 'Live Updating',
+      detail: 'Stream disconnected',
+      badgeClass: 'bg-[#ff3366]/10 border-[#ff3366]/30 text-[#ff3366]',
+      dotClass: 'bg-[#ff3366]',
+    },
+  }[liveConnectionState];
 
   return (
     <Layout>
@@ -115,8 +271,8 @@ export function Dashboard() {
               System Terminal
             </h1>
             <p className="text-[#00f0ff]/60 font-mono text-sm uppercase tracking-widest mt-2 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#00f0ff] animate-pulse"></span>
-              Awaiting Directives
+              <span className={`w-2 h-2 rounded-full ${liveStatusConfig.dotClass} animate-pulse`}></span>
+              {liveStatusConfig.label} | {liveStatusConfig.detail}
             </p>
           </div>
         </motion.div>
@@ -150,72 +306,45 @@ export function Dashboard() {
           />
         </motion.div>
 
-        {/* Neural Network Execution Control */}
+        {/* Live Monitor */}
         <motion.div variants={itemVariants}>
           <SpotlightCard className="p-8" spotlightColor="rgba(0, 240, 255, 0.1)">
             <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
                 <div>
-                  <h2 className="text-xl font-bold text-white uppercase tracking-wider mb-2">Execute Market Sweep</h2>
+                  <h2 className="text-xl font-bold text-white uppercase tracking-wider mb-2">Live Run Monitor</h2>
                   <p className="text-sm text-gray-400 font-mono">
-                    Scrape targeted Prime Sets and evaluate profitability across multiple spectrums.
+                    Latest completed analysis loads automatically. New runs refresh in real time once they finish.
                   </p>
-
-                  <div className="mt-4">
-                    <p className="text-[10px] uppercase tracking-widest text-gray-500 font-mono mb-2">
-                      Execution Mode
-                    </p>
-                    <div className="grid grid-cols-2 gap-2 p-1 rounded-lg bg-black/50 border border-white/10 max-w-xs">
-                      {(['instant', 'patient'] as ExecutionMode[]).map((mode) => {
-                        const selected = executionMode === mode;
-                        return (
-                          <button
-                            key={mode}
-                            type="button"
-                            onClick={() => setExecutionMode(mode)}
-                            disabled={isLoading}
-                            className={clsx(
-                              'px-3 py-2 rounded-md text-xs uppercase tracking-widest font-mono border transition-all',
-                              selected
-                                ? 'border-[#00f0ff]/40 bg-[#00f0ff]/15 text-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0.2)]'
-                                : 'border-white/10 text-gray-400 hover:border-[#00f0ff]/30 hover:text-white',
-                              isLoading && 'opacity-60 cursor-not-allowed'
-                            )}
-                          >
-                            {mode}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <label className="flex items-center gap-3 mt-4 cursor-pointer group w-max">
-                    <div className="relative flex items-center">
-                      <input
-                        type="checkbox"
-                        checked={testMode}
-                        onChange={(e) => setTestMode(e.target.checked)}
-                        className="peer sr-only"
-                      />
-                      <div className="w-10 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#00f0ff] shadow-[0_0_10px_rgba(0,240,255,0)] peer-checked:shadow-[0_0_10px_rgba(0,240,255,0.4)]"></div>
-                    </div>
-                    <span className="text-sm font-mono text-gray-400 group-hover:text-[#00f0ff] transition-colors">Test Protocol (Limit 10)</span>
-                  </label>
                 </div>
 
-                <Button
-                  onClick={handleRunAnalysis}
-                  disabled={isLoading}
-                  size="lg"
-                  className="w-full sm:w-auto font-mono uppercase tracking-widest text-sm"
-                  variant={isLoading ? "ghost" : "primary"}
-                  icon={isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
-                >
-                  {isLoading ? 'Processing...' : 'Engage'}
-                </Button>
+                <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-lg border font-mono text-xs uppercase tracking-widest w-max ${liveStatusConfig.badgeClass}`}>
+                  {liveConnectionState === 'disconnected' ? (
+                    <WifiOff className="w-4 h-4" />
+                  ) : (
+                    <Activity className="w-4 h-4" />
+                  )}
+                  {liveStatusConfig.label}
+                </div>
               </div>
 
-              {/* Holographic Progress Monitor */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="rounded-lg border border-white/10 bg-black/40 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-widest text-gray-500 font-mono mb-1">Connection</p>
+                  <p className="text-sm font-mono text-white">{liveStatusConfig.detail}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/40 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-widest text-gray-500 font-mono mb-1">Latest Run ID</p>
+                  <p className="text-sm font-mono text-white">{currentAnalysis?.run_id ?? '-'}</p>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/40 px-4 py-3">
+                  <p className="text-[10px] uppercase tracking-widest text-gray-500 font-mono mb-1">Loaded At</p>
+                  <p className="text-sm font-mono text-white">
+                    {currentAnalysis ? new Date(currentAnalysis.timestamp).toLocaleString() : '-'}
+                  </p>
+                </div>
+              </div>
+
               {isLoading && (
                 <motion.div
                   initial={{ opacity: 0, height: 0 }}
@@ -235,12 +364,22 @@ export function Dashboard() {
                       className="absolute top-0 bottom-0 left-0 bg-[#00f0ff] shadow-[0_0_15px_#00f0ff]"
                       initial={{ width: 0 }}
                       animate={{ width: `${progress ?? 0}%` }}
-                      transition={{ ease: "linear" }}
+                      transition={{ ease: 'linear' }}
                     >
-                      {/* Grid overlay for tech look inside bar */}
                       <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.2)_25%,rgba(255,255,255,0.2)_50%,transparent_50%,transparent_75%,rgba(255,255,255,0.2)_75%,rgba(255,255,255,0.2)_100%)] bg-[length:10px_10px] animate-[data-stream_1s_linear_infinite]" />
                     </motion.div>
                   </div>
+                </motion.div>
+              )}
+
+              {isHydrating && !currentAnalysis && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="pt-4 border-t border-white/10 flex items-center gap-3 text-sm font-mono text-[#00f0ff]"
+                >
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading latest completed analysis...
                 </motion.div>
               )}
 
@@ -295,7 +434,7 @@ export function Dashboard() {
 
         {/* Empty State / Standby Mode */}
         <AnimatePresence>
-          {!currentAnalysis && !isLoading && !error && (
+          {!currentAnalysis && !isLoading && !error && !isHydrating && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -308,7 +447,7 @@ export function Dashboard() {
                   <BarChart2 className="w-16 h-16 text-[#00f0ff]/30 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500" />
                   <h3 className="text-xl font-mono uppercase tracking-widest text-[#00f0ff]/50 mb-2">Standby Mode</h3>
                   <p className="text-gray-500 font-mono text-sm max-w-sm mx-auto">
-                    Engage the sweep above to initialize link with the Warframe Market mainframes.
+                    Waiting for the first completed analysis run to appear in the market archive.
                   </p>
                 </div>
               </Card>

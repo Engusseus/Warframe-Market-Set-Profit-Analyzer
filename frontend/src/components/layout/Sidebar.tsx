@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { BarChart3, History, Download, Activity, ChevronRight, Menu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '../common/SpotlightCard';
+import { cn } from '../../utils/cn';
 
 const navItems = [
     { path: '/', label: 'Terminal', icon: BarChart3 },

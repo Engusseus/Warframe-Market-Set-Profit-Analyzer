@@ -14,6 +14,33 @@ import aiosqlite
 from ..config import get_settings
 
 
+def _normalize_database_path(raw_db_path: str) -> str:
+    """Normalize database input path/URL to a SQLite file path."""
+    if raw_db_path == ":memory:":
+        return raw_db_path
+    if raw_db_path.startswith("sqlite:///"):
+        raw_db_path = raw_db_path.replace("sqlite:///", "", 1)
+    return os.path.abspath(raw_db_path)
+
+
+def _validate_database_path(raw_db_path: str, normalized_db_path: str) -> None:
+    """Validate database path format with local URL fallback support."""
+    if normalized_db_path == ":memory:":
+        return
+
+    # Keep legacy file path behavior: direct paths must be .sqlite.
+    if not raw_db_path.startswith("sqlite:///"):
+        if not normalized_db_path.endswith(".sqlite"):
+            raise ValueError("Database path must end with .sqlite extension")
+        return
+
+    # SQLite URL inputs allow .sqlite and .db to support local fallback.
+    if not normalized_db_path.endswith((".sqlite", ".db")):
+        raise ValueError(
+            "SQLite URL path must end with .sqlite or .db extension"
+        )
+
+
 class AsyncMarketDatabase:
     """Async SQLite database handler for market analysis data.
 
@@ -21,24 +48,24 @@ class AsyncMarketDatabase:
     """
 
     # Database schema version for future migrations
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, db_path: Optional[str] = None):
         """Initialize database connection and ensure table exists."""
         if db_path is None:
             settings = get_settings()
-            db_path = settings.database_path
+            db_path = settings.get_database_target()
 
-        self.db_path = os.path.abspath(db_path)
+        self.db_path = _normalize_database_path(db_path)
         self._lock = asyncio.Lock()
 
         # Validate database path
-        if not self.db_path.endswith('.sqlite'):
-            raise ValueError("Database path must end with .sqlite extension")
+        _validate_database_path(db_path, self.db_path)
 
         # Ensure cache directory exists
-        db_dir = os.path.dirname(self.db_path)
-        os.makedirs(db_dir, exist_ok=True)
+        if self.db_path != ":memory:":
+            db_dir = os.path.dirname(self.db_path)
+            os.makedirs(db_dir, exist_ok=True)
 
         # Initialize database synchronously on first use
         self._initialized = False
@@ -151,9 +178,22 @@ class AsyncMarketDatabase:
                 total_sets INTEGER NOT NULL,
                 profitable_sets INTEGER NOT NULL,
                 strategy TEXT DEFAULT 'balanced',
+                execution_mode TEXT DEFAULT 'instant',
                 FOREIGN KEY (run_id) REFERENCES market_runs (run_id)
             )
         ''')
+
+        # Backfill execution_mode column for pre-migration databases.
+        cursor = await conn.execute('PRAGMA table_info(run_metadata)')
+        run_metadata_columns = {row[1] for row in await cursor.fetchall()}
+        if 'execution_mode' not in run_metadata_columns:
+            await conn.execute(
+                "ALTER TABLE run_metadata ADD COLUMN execution_mode TEXT DEFAULT 'instant'"
+            )
+        await conn.execute(
+            "UPDATE run_metadata SET execution_mode = 'instant' "
+            "WHERE execution_mode IS NULL OR TRIM(execution_mode) = ''"
+        )
 
         # Create index for scored_set_data
         await conn.execute(
@@ -668,7 +708,8 @@ class AsyncMarketDatabase:
         scored_data: List[Dict[str, Any]],
         profit_weight: float = 1.0,
         volume_weight: float = 1.2,
-        strategy: str = 'balanced'
+        strategy: str = 'balanced',
+        execution_mode: str = 'instant',
     ) -> None:
         """Save full scored analysis data for a run.
 
@@ -678,11 +719,16 @@ class AsyncMarketDatabase:
             profit_weight: Profit weight used for scoring (legacy)
             volume_weight: Volume weight used for scoring (legacy)
             strategy: Strategy type used for scoring
+            execution_mode: Execution mode used for scoring
         """
         await self._ensure_initialized()
 
         if not scored_data:
             return
+
+        normalized_execution_mode = str(execution_mode).strip().lower()
+        if normalized_execution_mode not in {'instant', 'patient'}:
+            normalized_execution_mode = 'instant'
 
         profitable_count = len([s for s in scored_data if s.get('profit_margin', 0) > 0])
 
@@ -692,9 +738,17 @@ class AsyncMarketDatabase:
                 # Save run metadata with strategy
                 await conn.execute('''
                     INSERT OR REPLACE INTO run_metadata
-                    (run_id, profit_weight, volume_weight, total_sets, profitable_sets, strategy)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                ''', (run_id, profit_weight, volume_weight, len(scored_data), profitable_count, strategy))
+                    (run_id, profit_weight, volume_weight, total_sets, profitable_sets, strategy, execution_mode)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    run_id,
+                    profit_weight,
+                    volume_weight,
+                    len(scored_data),
+                    profitable_count,
+                    strategy,
+                    normalized_execution_mode,
+                ))
 
                 # Batch insert scored set data with new fields
                 records = []
@@ -768,9 +822,9 @@ class AsyncMarketDatabase:
             if not run_row:
                 return None
 
-            # Get run metadata (weights and strategy)
+            # Get run metadata (weights, strategy, execution mode)
             cursor = await conn.execute(
-                'SELECT profit_weight, volume_weight, total_sets, profitable_sets, strategy FROM run_metadata WHERE run_id = ?',
+                'SELECT profit_weight, volume_weight, total_sets, profitable_sets, strategy, execution_mode FROM run_metadata WHERE run_id = ?',
                 (run_id,)
             )
             metadata_row = await cursor.fetchone()
@@ -844,6 +898,7 @@ class AsyncMarketDatabase:
                 result['total_sets'] = metadata_row[2]
                 result['profitable_sets'] = metadata_row[3]
                 result['strategy'] = metadata_row[4] if metadata_row[4] else 'balanced'
+                result['execution_mode'] = metadata_row[5] if metadata_row[5] else 'instant'
             else:
                 result['weights'] = {
                     'profit_weight': 1.0,
@@ -851,6 +906,7 @@ class AsyncMarketDatabase:
                     'strategy': 'balanced'
                 }
                 result['strategy'] = 'balanced'
+                result['execution_mode'] = 'instant'
 
             return result
 

@@ -11,8 +11,9 @@ from typing import Deque
 class RateLimiter:
     """Rate limiter to ensure max requests per time window.
 
-    Uses a token bucket algorithm with a deque for efficient operations.
-    Converted to async for use with FastAPI and httpx.
+    Uses a strict queued window scheduler. Across any ``time_window`` span,
+    at most ``max_requests`` calls are permitted, and concurrent callers are
+    serialized by reserving future slots.
     """
 
     def __init__(self, max_requests: int = 3, time_window: float = 1.0):
@@ -40,61 +41,51 @@ class RateLimiter:
         while self.requests and current_time - self.requests[0] >= self.time_window:
             self.requests.popleft()
 
+    def _reserve_slot(self) -> float:
+        """Reserve the next queued request slot.
+
+        Returns:
+            Sleep time in seconds before the caller can proceed.
+        """
+        current_time = time.monotonic()
+        self._cleanup_old_requests(current_time)
+
+        if len(self.requests) < self.max_requests:
+            scheduled_time = current_time
+        else:
+            # Enforce no more than `max_requests` within any `time_window`.
+            # Compare against the request `max_requests` slots behind.
+            scheduled_time = max(
+                current_time,
+                self.requests[-self.max_requests] + self.time_window,
+            )
+
+        self.requests.append(scheduled_time)
+        return max(0.0, scheduled_time - current_time)
+
     async def wait_if_needed(self) -> None:
         """Wait if necessary to maintain rate limit.
 
-        This is an async method that will yield control while waiting,
-        allowing other coroutines to run without blocking the lock.
+        This method is fully async-safe and serializes slot reservation
+        across concurrent callers.
         """
-        while True:
-            sleep_time = 0
-            async with self._lock:
-                current_time = time.monotonic()
-                
-                # Remove requests older than time_window
-                self._cleanup_old_requests(current_time)
-                
-                # If we're at the limit, calculate sleep time
-                if len(self.requests) >= self.max_requests:
-                    oldest_request_time = self.requests[0]
-                    sleep_time = self.time_window - (current_time - oldest_request_time)
-                else:
-                    # We have capacity, record request and return
-                    self.requests.append(current_time)
-                    return
-            
-            # Wait outside the lock if necessary
-            if sleep_time > 0:
-                await asyncio.sleep(sleep_time)
+        async with self._lock:
+            sleep_time = self._reserve_slot()
+
+        if sleep_time > 0:
+            await asyncio.sleep(sleep_time)
 
     def get_current_rate(self) -> int:
         """Get the current number of requests in the time window."""
         current_time = time.monotonic()
         self._cleanup_old_requests(current_time)
-        return len(self.requests)
+        return sum(1 for request_time in self.requests if request_time <= current_time)
 
     def wait_if_needed_sync(self) -> None:
         """Synchronous version for non-async contexts.
 
         Preserved for backwards compatibility with sync code.
         """
-        current_time = time.monotonic()
-
-        # Remove requests older than time_window
-        self._cleanup_old_requests(current_time)
-
-        # If we're at the limit, wait until the oldest request expires
-        if len(self.requests) >= self.max_requests:
-            # Calculate when the oldest request will expire
-            oldest_request_time = self.requests[0]
-            sleep_time = self.time_window - (current_time - oldest_request_time)
-
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-
-                # Clean up after waiting
-                current_time = time.monotonic()
-                self._cleanup_old_requests(current_time)
-
-        # Record this request
-        self.requests.append(current_time)
+        sleep_time = self._reserve_slot()
+        if sleep_time > 0:
+            time.sleep(sleep_time)

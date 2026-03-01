@@ -8,12 +8,15 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Minus,
+  Activity,
+  WifiOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx } from 'clsx';
-import { cn } from '../common/SpotlightCard';
+import { cn } from '../../utils/cn';
 import type { ScoredSet } from '../../api/types';
 import { ScoreBreakdown } from './ScoreBreakdown';
+import { useAnalysisStore } from '../../store/analysisStore';
 
 interface ProfitTableProps {
   sets: ScoredSet[];
@@ -76,6 +79,40 @@ export function ProfitTable({ sets, onSelectSet }: ProfitTableProps) {
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const pageSize = 20;
+  const {
+    liveConnectionState,
+    isLoading,
+    progress,
+    progressMessage,
+    currentAnalysis,
+  } = useAnalysisStore();
+
+  const liveStatusConfig = {
+    monitoring: {
+      label: 'Live Updating',
+      detail: 'Monitoring for new runs',
+      className: 'text-[#00f0ff] border-[#00f0ff]/30 bg-[#00f0ff]/10',
+      dotClass: 'bg-[#00f0ff]',
+    },
+    connecting: {
+      label: 'Live Updating',
+      detail: 'Connecting to progress stream',
+      className: 'text-[#e5c158] border-[#e5c158]/30 bg-[#e5c158]/10',
+      dotClass: 'bg-[#e5c158]',
+    },
+    connected: {
+      label: 'Live Updating',
+      detail: 'Streaming progress',
+      className: 'text-[#00ffaa] border-[#00ffaa]/30 bg-[#00ffaa]/10',
+      dotClass: 'bg-[#00ffaa]',
+    },
+    disconnected: {
+      label: 'Live Updating',
+      detail: 'Progress stream disconnected',
+      className: 'text-[#ff3366] border-[#ff3366]/30 bg-[#ff3366]/10',
+      dotClass: 'bg-[#ff3366]',
+    },
+  }[liveConnectionState];
 
   const handleSort = (field: SortField) => {
     if (field === sortField) {
@@ -149,6 +186,26 @@ export function ProfitTable({ sets, onSelectSet }: ProfitTableProps) {
 
   return (
     <div className="flex flex-col bg-dark-card border border-dark-border wf-corner shadow-[0_4px_20px_rgba(0,0,0,0.2)] overflow-hidden relative">
+      <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 py-3 border-b border-white/10 bg-black/50">
+        <div className="flex items-center gap-3 font-mono">
+          <span className={`inline-flex items-center gap-2 px-2.5 py-1 rounded-full border text-[10px] uppercase tracking-widest ${liveStatusConfig.className}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${liveStatusConfig.dotClass} animate-pulse`} />
+            {liveStatusConfig.label}
+          </span>
+          <span className="text-xs text-gray-500 uppercase tracking-wider">{liveStatusConfig.detail}</span>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-mono text-gray-400 uppercase tracking-wider">
+          {liveConnectionState === 'disconnected' ? (
+            <WifiOff className="w-4 h-4 text-[#ff3366]" />
+          ) : (
+            <Activity className="w-4 h-4 text-[#00f0ff]" />
+          )}
+          {isLoading
+            ? `${progress ?? 0}% · ${progressMessage || 'Processing'}`
+            : `Run #${currentAnalysis?.run_id ?? '-'} · ${sets.length} sets`}
+        </div>
+      </div>
+
       <div className="overflow-x-auto relative z-10">
         <table className="w-full text-left border-collapse">
           <thead>
