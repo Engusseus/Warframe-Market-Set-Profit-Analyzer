@@ -19,6 +19,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 .coverage
 .coverage.*
 htmlcov/
@@ -36,6 +38,7 @@ dist/
 # Run artifacts
 *.log
 runs/*.csv
+runs/**/*.csv
 
 # Editor and OS files
 .vscode/

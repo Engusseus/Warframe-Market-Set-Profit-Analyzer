@@ -6,34 +6,81 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import json
 import logging
+import math
+import os
+import sys
+import tempfile
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 import httpx
 
 from config import (
+    ALLOW_THIN_ORDERBOOKS,
     API_V1_URL,
     API_V2_URL,
+    APP_NAME,
+    APP_VERSION,
     DEBUG_MODE,
+    DEFAULT_CROSSPLAY,
+    DEFAULT_LANGUAGE,
+    DEFAULT_LOG_FILE,
+    DEFAULT_LOG_LEVEL,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_OUTPUT_PREFIX,
-    HEADERS,
-    LOG_FILE,
+    DEFAULT_PLATFORM,
+    ENV_PREFIX,
+    JSON_SUMMARY,
+    LOG_BACKUP_COUNT,
+    LOG_MAX_BYTES,
     MAX_RETRIES,
     PRICE_SAMPLE_SIZE,
     PROFIT_WEIGHT,
-    REQUESTS_PER_SECOND,
     REQUEST_TIMEOUT_SECONDS,
+    REQUESTS_PER_SECOND,
     VOLUME_WEIGHT,
 )
 
-
 logger = logging.getLogger("wf_market_analyzer")
 TOP_ORDER_SAMPLE_LIMIT = 5
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504, 509}
+
+
+def generate_run_id() -> str:
+    """Generate a short ID for correlating logs and outputs."""
+
+    return uuid.uuid4().hex[:8]
+
+
+def build_request_headers(platform: str, language: str, crossplay: bool) -> dict[str, str]:
+    """Build request headers from the resolved runtime configuration."""
+
+    return {
+        "Platform": platform,
+        "Language": language,
+        "Crossplay": str(crossplay).lower(),
+        "Accept": "application/json",
+    }
+
+
+class RunIdFilter(logging.Filter):
+    """Attach the current run identifier to every log record."""
+
+    def __init__(self, run_id: str):
+        super().__init__()
+        self.run_id = run_id
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "run_id"):
+            record.run_id = self.run_id
+        return True
 
 
 @dataclass(slots=True)
@@ -42,17 +89,42 @@ class RuntimeConfig:
 
     api_v1_url: str = API_V1_URL
     api_v2_url: str = API_V2_URL
-    headers: dict[str, str] = field(default_factory=lambda: dict(HEADERS))
+    platform: str = DEFAULT_PLATFORM
+    language: str = DEFAULT_LANGUAGE
+    crossplay: bool = DEFAULT_CROSSPLAY
     requests_per_second: float = REQUESTS_PER_SECOND
     request_timeout_seconds: float = REQUEST_TIMEOUT_SECONDS
     max_retries: int = MAX_RETRIES
     output_dir: Path = field(default_factory=lambda: Path(DEFAULT_OUTPUT_DIR))
     output_prefix: str = DEFAULT_OUTPUT_PREFIX
-    log_file: Path = field(default_factory=lambda: Path(LOG_FILE))
+    output_file: Path | None = None
+    log_level: str = DEFAULT_LOG_LEVEL
+    log_file: Path | None = DEFAULT_LOG_FILE
+    log_max_bytes: int = LOG_MAX_BYTES
+    log_backup_count: int = LOG_BACKUP_COUNT
     debug: bool = DEBUG_MODE
+    json_summary: bool = JSON_SUMMARY
+    allow_thin_orderbooks: bool = ALLOW_THIN_ORDERBOOKS
     profit_weight: float = PROFIT_WEIGHT
     volume_weight: float = VOLUME_WEIGHT
     price_sample_size: int = PRICE_SAMPLE_SIZE
+    run_id: str = field(default_factory=generate_run_id)
+    headers: dict[str, str] = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.platform = self.platform.strip().lower()
+        self.language = self.language.strip().lower()
+        self.output_dir = Path(self.output_dir)
+        self.output_file = Path(self.output_file) if self.output_file is not None else None
+        self.log_file = Path(self.log_file) if self.log_file is not None else None
+        if self.debug:
+            self.log_level = "DEBUG"
+        self.log_level = self.log_level.upper()
+        self.headers = build_request_headers(
+            platform=self.platform,
+            language=self.language,
+            crossplay=self.crossplay,
+        )
 
 
 @dataclass(slots=True)
@@ -93,39 +165,86 @@ class ResultRow:
     run_timestamp: str
 
 
-def configure_logging(settings: RuntimeConfig) -> None:
-    """Configure console and file logging."""
+@dataclass(slots=True)
+class AnalysisReport:
+    """Structured summary of a completed analysis run."""
 
-    settings.log_file.parent.mkdir(parents=True, exist_ok=True)
-    handlers = [
-        logging.StreamHandler(),
-        logging.FileHandler(settings.log_file, encoding="utf-8"),
-    ]
-    logging.basicConfig(
-        level=logging.DEBUG if settings.debug else logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=handlers,
-        force=True,
+    results: list[ResultRow]
+    completed_at: datetime
+    catalog_set_count: int
+    metadata_set_count: int
+    skipped_invalid_set_count: int
+    skipped_missing_price_count: int
+    skipped_missing_volume_count: int
+
+
+def configure_logging(settings: RuntimeConfig) -> None:
+    """Configure analyzer logging to stderr and an optional rotated log file."""
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s %(levelname)s [%(name)s] run_id=%(run_id)s %(message)s"
     )
+    handlers: list[logging.Handler] = []
+    run_id_filter = RunIdFilter(settings.run_id)
+
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(formatter)
+    stream_handler.addFilter(run_id_filter)
+    handlers.append(stream_handler)
+
+    if settings.log_file is not None:
+        settings.log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = RotatingFileHandler(
+            settings.log_file,
+            encoding="utf-8",
+            maxBytes=settings.log_max_bytes,
+            backupCount=settings.log_backup_count,
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.addFilter(run_id_filter)
+        handlers.append(file_handler)
+
+    for handler in list(logger.handlers):
+        handler.close()
+    logger.handlers.clear()
+    logger.setLevel(getattr(logging, settings.log_level, logging.INFO))
+    logger.propagate = False
+    for handler in handlers:
+        logger.addHandler(handler)
+
+    external_log_level = logging.DEBUG if settings.debug else logging.WARNING
+    for logger_name in ("httpx", "httpcore"):
+        logging.getLogger(logger_name).setLevel(external_log_level)
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
-    """Convert an arbitrary value to float safely."""
+    """Convert an arbitrary value to a finite float safely."""
 
     try:
-        return float(value)
+        parsed = float(value)
     except (TypeError, ValueError):
         return default
-
-
-def safe_positive_int(value: Any, default: int = 1) -> int:
-    """Convert an arbitrary value to a positive int safely."""
-
-    try:
-        parsed = int(float(value))
-    except (TypeError, ValueError):
+    if not math.isfinite(parsed):
         return default
-    return parsed if parsed > 0 else default
+    return parsed
+
+
+def parse_required_positive_int(value: Any) -> int | None:
+    """Parse a required positive integer-like value."""
+
+    parsed = safe_float(value, default=math.nan)
+    if not math.isfinite(parsed) or parsed <= 0 or not parsed.is_integer():
+        return None
+    return int(parsed)
+
+
+def parse_required_non_negative_int(value: Any) -> int | None:
+    """Parse a required non-negative integer-like value."""
+
+    parsed = safe_float(value, default=math.nan)
+    if not math.isfinite(parsed) or parsed < 0 or not parsed.is_integer():
+        return None
+    return int(parsed)
 
 
 def extract_item_name(item: dict[str, Any], fallback_slug: str) -> str:
@@ -163,14 +282,22 @@ def extract_set_items(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
-def calculate_average_sell_price(prices: list[float], sample_size: int) -> float | None:
+def calculate_average_sell_price(
+    prices: list[float],
+    sample_size: int,
+    allow_thin_orderbooks: bool = False,
+) -> float | None:
     """Average the lowest N positive sell prices."""
 
     valid_prices = sorted(price for price in prices if price > 0)
     if not valid_prices:
         return None
 
-    take_count = min(max(sample_size, 1), len(valid_prices))
+    required_sample_size = max(sample_size, 1)
+    if not allow_thin_orderbooks and len(valid_prices) < required_sample_size:
+        return None
+
+    take_count = min(required_sample_size, len(valid_prices))
     selected = valid_prices[:take_count]
     return sum(selected) / len(selected)
 
@@ -222,23 +349,34 @@ def format_part_prices(result: ResultRow) -> str:
     return "; ".join(formatted_parts)
 
 
-def build_output_path(output_dir: Path, completed_at: datetime, prefix: str = DEFAULT_OUTPUT_PREFIX) -> Path:
-    """Build a timestamped output path and avoid collisions."""
+def build_output_path(
+    output_dir: Path,
+    completed_at: datetime,
+    prefix: str = DEFAULT_OUTPUT_PREFIX,
+    output_file: Path | None = None,
+    run_id: str | None = None,
+) -> Path:
+    """Build the final output path for a run."""
+
+    if output_file is not None:
+        return Path(output_file)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     base_name = f"{prefix}_{completed_at:%Y%m%d_%H%M%S}"
+
+    if run_id:
+        return output_dir / f"{base_name}_{run_id}.csv"
+
     candidate = output_dir / f"{base_name}.csv"
     suffix = 1
-
     while candidate.exists():
         candidate = output_dir / f"{base_name}_{suffix}.csv"
         suffix += 1
-
     return candidate
 
 
 def write_results_to_csv(results: list[ResultRow], output_path: Path) -> None:
-    """Write ranked results to a CSV file."""
+    """Write ranked results to a CSV file atomically."""
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
@@ -253,24 +391,41 @@ def write_results_to_csv(results: list[ResultRow], output_path: Path) -> None:
         "Part Prices",
     ]
 
-    with output_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            newline="",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.stem}_",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
 
-        for result in results:
-            writer.writerow(
-                {
-                    "Run Timestamp": result.run_timestamp,
-                    "Set Name": result.set_data.name,
-                    "Set Slug": result.set_data.slug,
-                    "Profit": f"{result.price_data.profit:.1f}",
-                    "Set Selling Price": f"{result.price_data.set_price:.1f}",
-                    "Part Costs Total": f"{result.price_data.total_part_cost:.1f}",
-                    "Volume (48h)": result.volume_data.volume_48h,
-                    "Score": f"{result.score:.4f}",
-                    "Part Prices": format_part_prices(result),
-                }
-            )
+            for result in results:
+                writer.writerow(
+                    {
+                        "Run Timestamp": result.run_timestamp,
+                        "Set Name": result.set_data.name,
+                        "Set Slug": result.set_data.slug,
+                        "Profit": f"{result.price_data.profit:.1f}",
+                        "Set Selling Price": f"{result.price_data.set_price:.1f}",
+                        "Part Costs Total": f"{result.price_data.total_part_cost:.1f}",
+                        "Volume (48h)": result.volume_data.volume_48h,
+                        "Score": f"{result.score:.4f}",
+                        "Part Prices": format_part_prices(result),
+                    }
+                )
+
+        temp_path.replace(output_path)
+    except Exception:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+        raise
 
 
 class WarframeMarketClient:
@@ -333,7 +488,7 @@ class WarframeMarketClient:
                 logger.error("Unexpected JSON payload type from %s", url)
                 return None
 
-            if response.status_code in {429, 500, 502, 503, 504}:
+            if response.status_code in RETRYABLE_STATUS_CODES:
                 logger.warning(
                     "Transient HTTP %s from %s on attempt %s/%s",
                     response.status_code,
@@ -404,7 +559,17 @@ class WarframeMarketClient:
                 set_name = extract_item_name(item, set_slug)
                 continue
 
-            parts[item_slug] = safe_positive_int(item.get("quantityInSet"), default=1)
+            quantity = parse_required_positive_int(item.get("quantityInSet"))
+            if quantity is None:
+                logger.warning(
+                    "Skipping %s because part %s had invalid quantityInSet=%r",
+                    set_slug,
+                    item_slug,
+                    item.get("quantityInSet"),
+                )
+                return None
+
+            parts[item_slug] = quantity
             part_names[item_slug] = extract_item_name(item, item_slug)
 
         if not parts:
@@ -464,8 +629,19 @@ class WarframeMarketClient:
         total_volume = 0
         for entry in hours_48:
             if not isinstance(entry, dict):
-                continue
-            total_volume += max(int(safe_float(entry.get("volume"), 0.0)), 0)
+                logger.warning("Skipping %s because one volume entry was not an object", set_slug)
+                return None
+
+            volume = parse_required_non_negative_int(entry.get("volume"))
+            if volume is None:
+                logger.warning(
+                    "Skipping %s because one volume entry had invalid volume=%r",
+                    set_slug,
+                    entry.get("volume"),
+                )
+                return None
+
+            total_volume += volume
         return total_volume
 
 
@@ -476,17 +652,18 @@ class SetProfitAnalyzer:
         self.settings = settings
         self.client = WarframeMarketClient(settings, transport=transport)
 
-    async def analyze(self) -> tuple[list[ResultRow], datetime]:
-        """Run the complete analysis and return ranked results."""
+    async def analyze(self) -> AnalysisReport:
+        """Run the complete analysis and return a structured report."""
 
         try:
             return await self._analyze()
         finally:
             await self.client.close()
 
-    async def _analyze(self) -> tuple[list[ResultRow], datetime]:
+    async def _analyze(self) -> AnalysisReport:
         set_slugs = await self.client.fetch_all_prime_set_slugs()
-        logger.info("Found %s Prime sets in the v2 catalog", len(set_slugs))
+        catalog_set_count = len(set_slugs)
+        logger.info("Found %s Prime sets in the v2 catalog", catalog_set_count)
 
         set_catalog: list[SetData] = []
         for index, set_slug in enumerate(set_slugs, start=1):
@@ -494,11 +671,14 @@ class SetProfitAnalyzer:
             if set_data is not None:
                 set_catalog.append(set_data)
 
-            if index % 25 == 0 or index == len(set_slugs):
-                logger.info("Fetched set metadata %s/%s", index, len(set_slugs))
+            if index % 25 == 0 or index == catalog_set_count:
+                logger.info("Fetched set metadata %s/%s", index, catalog_set_count)
 
         if not set_catalog:
             raise RuntimeError("No valid Prime set metadata could be loaded")
+
+        metadata_set_count = len(set_catalog)
+        skipped_invalid_set_count = catalog_set_count - metadata_set_count
 
         unique_item_slugs = list(dict.fromkeys(
             [set_data.slug for set_data in set_catalog]
@@ -513,25 +693,29 @@ class SetProfitAnalyzer:
                 logger.info("Fetched orderbooks %s/%s", index, len(unique_item_slugs))
 
         volumes: dict[str, int | None] = {}
-        logger.info("Fetching 48-hour volume for %s sets", len(set_catalog))
+        logger.info("Fetching 48-hour volume for %s sets", metadata_set_count)
         for index, set_data in enumerate(set_catalog, start=1):
             volumes[set_data.slug] = await self.client.fetch_volume_48h(set_data.slug)
-            if index % 25 == 0 or index == len(set_catalog):
-                logger.info("Fetched set volumes %s/%s", index, len(set_catalog))
+            if index % 25 == 0 or index == metadata_set_count:
+                logger.info("Fetched set volumes %s/%s", index, metadata_set_count)
 
         completed_at = datetime.now().astimezone().replace(microsecond=0)
         run_timestamp = completed_at.isoformat()
         results: list[ResultRow] = []
+        skipped_missing_price_count = 0
+        skipped_missing_volume_count = 0
 
         for set_data in set_catalog:
             price_data = self._calculate_set_profit(set_data, orderbook_prices)
             volume = volumes.get(set_data.slug)
 
             if price_data is None:
+                skipped_missing_price_count += 1
                 logger.debug("Skipping %s because pricing data was incomplete", set_data.slug)
                 continue
 
             if volume is None:
+                skipped_missing_volume_count += 1
                 logger.debug("Skipping %s because 48-hour volume data was unavailable", set_data.slug)
                 continue
 
@@ -546,7 +730,11 @@ class SetProfitAnalyzer:
             )
 
         if not results:
-            raise RuntimeError("No analyzable sets were produced from the API responses")
+            raise RuntimeError(
+                "No analyzable sets were produced from the API responses "
+                f"(missing_price={skipped_missing_price_count}, "
+                f"missing_volume={skipped_missing_volume_count})"
+            )
 
         score_results(
             results,
@@ -555,8 +743,25 @@ class SetProfitAnalyzer:
         )
         results.sort(key=lambda row: row.score, reverse=True)
 
-        logger.info("Analysis complete. Ranked %s sets.", len(results))
-        return results, completed_at
+        logger.info(
+            "Analysis complete. Ranked %s sets (catalog=%s metadata=%s skipped_invalid=%s "
+            "skipped_price=%s skipped_volume=%s)",
+            len(results),
+            catalog_set_count,
+            metadata_set_count,
+            skipped_invalid_set_count,
+            skipped_missing_price_count,
+            skipped_missing_volume_count,
+        )
+        return AnalysisReport(
+            results=results,
+            completed_at=completed_at,
+            catalog_set_count=catalog_set_count,
+            metadata_set_count=metadata_set_count,
+            skipped_invalid_set_count=skipped_invalid_set_count,
+            skipped_missing_price_count=skipped_missing_price_count,
+            skipped_missing_volume_count=skipped_missing_volume_count,
+        )
 
     def _calculate_set_profit(
         self,
@@ -566,6 +771,7 @@ class SetProfitAnalyzer:
         set_price = calculate_average_sell_price(
             orderbook_prices.get(set_data.slug, []),
             self.settings.price_sample_size,
+            allow_thin_orderbooks=self.settings.allow_thin_orderbooks,
         )
         if set_price is None:
             return None
@@ -577,6 +783,7 @@ class SetProfitAnalyzer:
             part_price = calculate_average_sell_price(
                 orderbook_prices.get(part_slug, []),
                 self.settings.price_sample_size,
+                allow_thin_orderbooks=self.settings.allow_thin_orderbooks,
             )
             if part_price is None:
                 return None
@@ -595,10 +802,77 @@ class SetProfitAnalyzer:
 def positive_int(value: str) -> int:
     """Argparse type for positive integers."""
 
-    parsed = int(value)
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("value must be an integer") from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError("value must be greater than zero")
     return parsed
+
+
+def non_negative_int(value: str) -> int:
+    """Argparse type for non-negative integers."""
+
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("value must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be zero or greater")
+    return parsed
+
+
+def positive_float(value: str) -> float:
+    """Argparse type for finite positive floats."""
+
+    parsed = safe_float(value, default=math.nan)
+    if not math.isfinite(parsed) or parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be a finite number greater than zero")
+    return parsed
+
+
+def non_negative_finite_float(value: str) -> float:
+    """Argparse type for finite non-negative floats."""
+
+    parsed = safe_float(value, default=math.nan)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("value must be a finite number zero or greater")
+    return parsed
+
+
+def non_empty_string(value: str) -> str:
+    """Argparse type for non-empty strings."""
+
+    parsed = value.strip()
+    if not parsed:
+        raise argparse.ArgumentTypeError("value must not be empty")
+    return parsed
+
+
+def log_level_arg(value: str) -> str:
+    """Argparse type for supported log levels."""
+
+    normalized = value.strip().upper()
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if normalized not in valid_levels:
+        raise argparse.ArgumentTypeError(
+            f"value must be one of {', '.join(sorted(valid_levels))}"
+        )
+    return normalized
+
+
+def bool_arg(value: str) -> bool:
+    """Parse common boolean strings from environment variables."""
+
+    normalized = value.strip().lower()
+    truthy = {"1", "true", "yes", "on"}
+    falsy = {"0", "false", "no", "off"}
+    if normalized in truthy:
+        return True
+    if normalized in falsy:
+        return False
+    raise argparse.ArgumentTypeError("value must be a boolean-like string")
 
 
 def price_sample_size_arg(value: str) -> int:
@@ -612,6 +886,71 @@ def price_sample_size_arg(value: str) -> int:
     return parsed
 
 
+def env_var_name(name: str) -> str:
+    """Build a namespaced environment variable name."""
+
+    return f"{ENV_PREFIX}_{name}"
+
+
+def read_env(name: str) -> str | None:
+    """Read an environment variable, treating blank values as unset."""
+
+    value = os.getenv(env_var_name(name))
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def resolve_option(
+    cli_value: Any,
+    env_name: str,
+    default: Any,
+    parser: Callable[[str], Any] | None = None,
+) -> Any:
+    """Resolve a setting from CLI input, environment, or fallback default."""
+
+    if cli_value is not None:
+        return cli_value
+
+    raw_value = read_env(env_name)
+    if raw_value is None:
+        return default
+
+    if parser is None:
+        return raw_value
+
+    try:
+        return parser(raw_value)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError(f"{env_var_name(env_name)}: {exc}") from exc
+
+
+def runtime_config_to_log_dict(settings: RuntimeConfig) -> dict[str, Any]:
+    """Build a log-friendly view of the resolved runtime settings."""
+
+    return {
+        "api_v1_url": settings.api_v1_url,
+        "api_v2_url": settings.api_v2_url,
+        "platform": settings.platform,
+        "language": settings.language,
+        "crossplay": settings.crossplay,
+        "requests_per_second": settings.requests_per_second,
+        "request_timeout_seconds": settings.request_timeout_seconds,
+        "max_retries": settings.max_retries,
+        "output_dir": str(settings.output_dir),
+        "output_prefix": settings.output_prefix,
+        "output_file": str(settings.output_file) if settings.output_file else None,
+        "log_level": settings.log_level,
+        "log_file": str(settings.log_file) if settings.log_file else None,
+        "profit_weight": settings.profit_weight,
+        "volume_weight": settings.volume_weight,
+        "price_sample_size": settings.price_sample_size,
+        "allow_thin_orderbooks": settings.allow_thin_orderbooks,
+        "json_summary": settings.json_summary,
+    }
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments."""
 
@@ -621,74 +960,241 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "endpoints and the v1 statistics endpoint."
         )
     )
-    parser.add_argument("--profit-weight", type=float, default=PROFIT_WEIGHT)
-    parser.add_argument("--volume-weight", type=float, default=VOLUME_WEIGHT)
+    parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
+    parser.add_argument("--profit-weight", type=non_negative_finite_float, default=None)
+    parser.add_argument("--volume-weight", type=non_negative_finite_float, default=None)
     parser.add_argument(
         "--price-sample-size",
         type=price_sample_size_arg,
-        default=PRICE_SAMPLE_SIZE,
+        default=None,
     )
-    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--debug", action="store_true", default=DEBUG_MODE)
+    parser.add_argument("--requests-per-second", type=positive_float, default=None)
+    parser.add_argument("--timeout", type=positive_float, default=None)
+    parser.add_argument("--max-retries", type=positive_int, default=None)
+    parser.add_argument("--platform", type=non_empty_string, default=None)
+    parser.add_argument("--language", type=non_empty_string, default=None)
+    parser.add_argument("--api-v1-url", type=non_empty_string, default=None)
+    parser.add_argument("--api-v2-url", type=non_empty_string, default=None)
+    parser.add_argument("--output-dir", type=non_empty_string, default=None)
+    parser.add_argument("--output-prefix", type=non_empty_string, default=None)
+    parser.add_argument("--output-file", type=non_empty_string, default=None)
+    parser.add_argument("--log-level", type=log_level_arg, default=None)
+    parser.add_argument("--log-file", type=non_empty_string, default=None)
+    parser.add_argument("--debug", action="store_true", default=None)
+    parser.add_argument(
+        "--crossplay",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--allow-thin-orderbooks",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
+    parser.add_argument(
+        "--json-summary",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+    )
     return parser.parse_args(argv)
 
 
 def runtime_config_from_args(args: argparse.Namespace) -> RuntimeConfig:
-    """Resolve runtime settings from CLI arguments."""
+    """Resolve runtime settings from CLI arguments and environment variables."""
+
+    profit_weight = resolve_option(
+        args.profit_weight,
+        "PROFIT_WEIGHT",
+        PROFIT_WEIGHT,
+        non_negative_finite_float,
+    )
+    volume_weight = resolve_option(
+        args.volume_weight,
+        "VOLUME_WEIGHT",
+        VOLUME_WEIGHT,
+        non_negative_finite_float,
+    )
+    if profit_weight == 0 and volume_weight == 0:
+        raise ValueError("At least one of profit_weight or volume_weight must be greater than zero")
+
+    debug = resolve_option(args.debug, "DEBUG", DEBUG_MODE, bool_arg)
+    log_level = resolve_option(args.log_level, "LOG_LEVEL", DEFAULT_LOG_LEVEL, log_level_arg)
+    if debug:
+        log_level = "DEBUG"
+
+    output_file_value = resolve_option(args.output_file, "OUTPUT_FILE", None, non_empty_string)
+    log_file_value = resolve_option(args.log_file, "LOG_FILE", DEFAULT_LOG_FILE, non_empty_string)
 
     return RuntimeConfig(
-        output_dir=Path(args.output_dir),
-        debug=bool(args.debug),
-        profit_weight=float(args.profit_weight),
-        volume_weight=float(args.volume_weight),
-        price_sample_size=int(args.price_sample_size),
+        api_v1_url=resolve_option(args.api_v1_url, "API_V1_URL", API_V1_URL, non_empty_string),
+        api_v2_url=resolve_option(args.api_v2_url, "API_V2_URL", API_V2_URL, non_empty_string),
+        platform=resolve_option(args.platform, "PLATFORM", DEFAULT_PLATFORM, non_empty_string),
+        language=resolve_option(args.language, "LANGUAGE", DEFAULT_LANGUAGE, non_empty_string),
+        crossplay=resolve_option(args.crossplay, "CROSSPLAY", DEFAULT_CROSSPLAY, bool_arg),
+        requests_per_second=resolve_option(
+            args.requests_per_second,
+            "REQUESTS_PER_SECOND",
+            REQUESTS_PER_SECOND,
+            positive_float,
+        ),
+        request_timeout_seconds=resolve_option(
+            args.timeout,
+            "TIMEOUT",
+            REQUEST_TIMEOUT_SECONDS,
+            positive_float,
+        ),
+        max_retries=resolve_option(args.max_retries, "MAX_RETRIES", MAX_RETRIES, positive_int),
+        output_dir=Path(resolve_option(args.output_dir, "OUTPUT_DIR", DEFAULT_OUTPUT_DIR, non_empty_string)),
+        output_prefix=resolve_option(
+            args.output_prefix,
+            "OUTPUT_PREFIX",
+            DEFAULT_OUTPUT_PREFIX,
+            non_empty_string,
+        ),
+        output_file=Path(output_file_value) if output_file_value is not None else None,
+        log_level=log_level,
+        log_file=Path(log_file_value) if log_file_value is not None else None,
+        debug=debug,
+        json_summary=resolve_option(args.json_summary, "JSON_SUMMARY", JSON_SUMMARY, bool_arg),
+        allow_thin_orderbooks=resolve_option(
+            args.allow_thin_orderbooks,
+            "ALLOW_THIN_ORDERBOOKS",
+            ALLOW_THIN_ORDERBOOKS,
+            bool_arg,
+        ),
+        profit_weight=profit_weight,
+        volume_weight=volume_weight,
+        price_sample_size=resolve_option(
+            args.price_sample_size,
+            "PRICE_SAMPLE_SIZE",
+            PRICE_SAMPLE_SIZE,
+            price_sample_size_arg,
+        ),
+    )
+
+
+def build_summary(
+    output_path: Path,
+    report: AnalysisReport,
+    settings: RuntimeConfig,
+    duration_seconds: float,
+) -> dict[str, Any]:
+    """Build the run summary returned to operators."""
+
+    return {
+        "status": "ok",
+        "run_id": settings.run_id,
+        "completed_at": report.completed_at.isoformat(),
+        "duration_seconds": round(duration_seconds, 3),
+        "output_path": str(output_path),
+        "catalog_set_count": report.catalog_set_count,
+        "metadata_set_count": report.metadata_set_count,
+        "ranked_set_count": len(report.results),
+        "skipped_invalid_set_count": report.skipped_invalid_set_count,
+        "skipped_missing_price_count": report.skipped_missing_price_count,
+        "skipped_missing_volume_count": report.skipped_missing_volume_count,
+        "price_sample_size": settings.price_sample_size,
+        "allow_thin_orderbooks": settings.allow_thin_orderbooks,
+    }
+
+
+def render_human_summary(summary: dict[str, Any]) -> str:
+    """Render a concise human-readable success summary."""
+
+    return "\n".join(
+        [
+            f"Run {summary['run_id']} completed in {summary['duration_seconds']:.3f}s",
+            (
+                "Ranked {ranked_set_count} sets "
+                "(catalog={catalog_set_count}, metadata={metadata_set_count}, "
+                "skipped_invalid={skipped_invalid_set_count}, "
+                "skipped_price={skipped_missing_price_count}, "
+                "skipped_volume={skipped_missing_volume_count})"
+            ).format(**summary),
+            f"CSV written to: {summary['output_path']}",
+        ]
     )
 
 
 async def run_analysis(
     settings: RuntimeConfig,
     transport: Any = None,
-) -> tuple[Path, list[ResultRow]]:
-    """Run analysis and persist the timestamped CSV output."""
+) -> tuple[Path, AnalysisReport]:
+    """Run analysis and persist the CSV output."""
 
     analyzer = SetProfitAnalyzer(settings, transport=transport)
-    results, completed_at = await analyzer.analyze()
+    report = await analyzer.analyze()
     output_path = build_output_path(
         settings.output_dir,
-        completed_at,
+        report.completed_at,
         prefix=settings.output_prefix,
+        output_file=settings.output_file,
+        run_id=None if settings.output_file is not None else settings.run_id,
     )
-    write_results_to_csv(results, output_path)
-    return output_path, results
+    write_results_to_csv(report.results, output_path)
+    return output_path, report
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entrypoint."""
 
     args = parse_args(argv)
-    settings = runtime_config_from_args(args)
-    configure_logging(settings)
-
-    print("=== Warframe Market Set Profit Analyzer ===")
-    print(f"Profit weight: {settings.profit_weight}")
-    print(f"Volume weight: {settings.volume_weight}")
-    print(f"Price sample size: {settings.price_sample_size}")
-    print("Using v2 item/order endpoints and v1 statistics.")
-    print("Starting analysis...")
 
     try:
-        output_path, results = asyncio.run(run_analysis(settings))
+        settings = runtime_config_from_args(args)
+    except ValueError as exc:
+        print(f"Configuration error: {exc}", file=sys.stderr)
+        return 2
+
+    configure_logging(settings)
+    logger.info("%s %s starting", APP_NAME, APP_VERSION)
+    logger.info(
+        "Resolved runtime config: %s",
+        json.dumps(runtime_config_to_log_dict(settings), sort_keys=True),
+    )
+
+    started_at = time.monotonic()
+    try:
+        output_path, report = asyncio.run(run_analysis(settings))
     except KeyboardInterrupt:
-        print("\nProcess interrupted by user.")
+        logger.warning("Analysis interrupted by user")
+        if settings.json_summary:
+            print(json.dumps({"status": "interrupted", "run_id": settings.run_id}, sort_keys=True))
         return 130
     except Exception as exc:
-        logger.error("Analyzer failed", exc_info=True)
-        print(f"\nAnalysis failed: {exc}")
-        print(f"Check {settings.log_file} for details.")
+        duration_seconds = time.monotonic() - started_at
+        logger.error("Analyzer failed after %.3fs", duration_seconds, exc_info=True)
+        if settings.json_summary:
+            print(
+                json.dumps(
+                    {
+                        "status": "failed",
+                        "run_id": settings.run_id,
+                        "duration_seconds": round(duration_seconds, 3),
+                        "error": str(exc),
+                        "log_file": str(settings.log_file) if settings.log_file else None,
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"Analysis failed: {exc}", file=sys.stderr)
+            if settings.log_file:
+                print(f"Check {settings.log_file} for details.", file=sys.stderr)
         return 1
 
-    print(f"\nAnalysis complete. Ranked {len(results)} sets.")
-    print(f"CSV written to: {output_path}")
+    duration_seconds = time.monotonic() - started_at
+    summary = build_summary(output_path, report, settings, duration_seconds)
+    logger.info(
+        "Analysis succeeded in %.3fs with %s ranked sets",
+        duration_seconds,
+        len(report.results),
+    )
+
+    if settings.json_summary:
+        print(json.dumps(summary, sort_keys=True))
+    else:
+        print(render_human_summary(summary))
     return 0
 
 
