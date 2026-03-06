@@ -12,6 +12,9 @@ INITIAL.md
 _bmad/
 docs/
 
+# Local-only repository artifacts
+.github/workflows/
+
 # Node.js / Frontend
 node_modules/
 frontend/node_modules/
@@ -67,6 +70,10 @@ env/
 ENV/
 env.bak/
 venv.bak/
+
+# Run artifacts
+runs/*.csv
+runs/**/*.csv
 
 # IDE files
 .vscode/
