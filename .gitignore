@@ -14,6 +14,10 @@ INITIAL.md
 .bmad/
 _bmad/
 
+# Local-only repository artifacts
+docs/local/
+.github/workflows/
+
 # Python cache and test artifacts
 __pycache__/
 *.py[cod]
