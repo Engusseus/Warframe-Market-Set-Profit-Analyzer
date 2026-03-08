@@ -18,52 +18,95 @@ endpoint for 48-hour volume because that metric is not currently exposed by v2.
 ## Requirements
 
 - Python 3.10+
+- On Debian/Ubuntu, install `python3-venv` or `python3-virtualenv` if local
+  virtual environment creation is unavailable
 
-## Installation
+## Quick Start
 
-Install the packaged CLI:
+The repo ships with launchers that keep everything inside a repo-local
+`.venv/`, so packages do not land in your system Python.
 
-```bash
-python3 -m pip install --break-system-packages .
-```
-
-For local development, install with the full QA toolchain:
-
-```bash
-python3 -m pip install --break-system-packages -e ".[dev]"
-```
-
-`requirements.txt` is kept as a runtime-only dependency file for lightweight
-deployments:
+If `./run.sh` cannot create `.venv`, install Linux virtual environment support
+first. On Debian/Ubuntu that is:
 
 ```bash
-python3 -m pip install --break-system-packages -r requirements.txt
+sudo apt install python3-venv python3-virtualenv
 ```
+
+### Fresh clone
+
+Clone the repo, enter it, then run the platform launcher:
+
+```bash
+git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
+cd Warframe-Market-Set-Profit-Analyzer
+./run.sh --help
+```
+
+On Windows:
+
+```powershell
+git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
+cd Warframe-Market-Set-Profit-Analyzer
+run.bat --help
+```
+
+### Update an existing checkout
+
+If you are following the `dev` branch, pull the latest changes and rerun the
+launcher:
+
+```bash
+git checkout dev
+git pull
+./run.sh
+```
+
+On Windows:
+
+```powershell
+git checkout dev
+git pull
+run.bat
+```
+
+Each launcher will:
+
+- create `.venv/` in the repo if it does not exist
+- upgrade `pip` inside that virtual environment
+- install or update the packaged CLI from the current checkout
+- run `wf-market-analyzer` with any extra arguments you pass through
 
 ## Usage
 
-Run the installed console script:
+The launchers are the easiest way to run the tool:
 
 ```bash
-wf-market-analyzer
+./run.sh
 ```
 
-Direct module execution still works:
+On Windows:
 
-```bash
-python3 wf_market_analyzer.py
+```powershell
+run.bat
 ```
 
-Inspect the full flag surface for your installed version:
+Inspect the full flag surface:
 
 ```bash
-wf-market-analyzer --help
+./run.sh --help
+```
+
+On Windows:
+
+```powershell
+run.bat --help
 ```
 
 Example:
 
 ```bash
-wf-market-analyzer \
+./run.sh \
   --profit-weight 1.0 \
   --volume-weight 1.2 \
   --price-sample-size 2 \
@@ -71,6 +114,8 @@ wf-market-analyzer \
   --timeout 20 \
   --output-dir runs
 ```
+
+On Windows, replace `./run.sh` with `run.bat`.
 
 By default, each run produces a timestamped CSV artifact with a unique run ID,
 for example:
@@ -80,6 +125,29 @@ runs/set_profit_analysis_20260305_141516_a1b2c3d4.csv
 ```
 
 If you need a fixed location for downstream automation, pass `--output-file`.
+
+## Manual Environment Setup
+
+If you prefer to manage the environment yourself, keep the install inside a
+virtual environment:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+wf-market-analyzer --help
+```
+
+On Windows:
+
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install .
+wf-market-analyzer --help
+```
 
 ## Scoring Model
 
@@ -159,31 +227,6 @@ Common examples:
 ```cron
 0 */6 * * * /srv/wf-market-analyzer/bin/wf-market-analyzer --output-file /srv/wf-market-analyzer/runs/latest.csv --log-file /srv/wf-market-analyzer/logs/analyzer.log --json-summary >> /srv/wf-market-analyzer/logs/job.json 2>> /srv/wf-market-analyzer/logs/job.stderr
 ```
-
-### Container or CI usage
-
-- write artifacts to a mounted volume instead of the repo checkout
-- prefer `--output-file` or `--json-summary` for downstream automation
-- send `stderr` to the platform log collector, optionally with `--log-file` for local retention
-- keep API request pacing conservative to avoid 429/509 responses
-- treat non-zero exit codes as job failures
-
-## Development Workflow
-
-Install the dev extras once, then run:
-
-```bash
-ruff check .
-mypy wf_market_analyzer.py config.py
-pytest
-```
-
-GitHub Actions runs the same gates on Python 3.10, 3.11, 3.12, and 3.13.
-
-## Reference Material
-
-- Local Warframe Market v2 API reference:
-  [docs/local/warframe-market-api-v2-reference.md](docs/local/warframe-market-api-v2-reference.md)
 
 ## License
 
