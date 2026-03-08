@@ -1,7 +1,7 @@
 """Default configuration for the Warframe Market CLI analyzer."""
 
 APP_NAME = "Warframe Market Set Profit Analyzer"
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.4.0"
 ENV_PREFIX = "WF_MARKET_ANALYZER"
 
 API_BASE_URL = "https://api.warframe.market"
