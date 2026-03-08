@@ -1,271 +1,151 @@
 # Warframe Market Set Profit Analyzer
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9+-3178c6.svg)](https://www.typescriptlang.org/)
-[![Docker](https://img.shields.io/badge/Docker-ready-2496ED.svg)](https://www.docker.com/)
+`warframe-market-set-profit-analyzer` is a packaged Python CLI for ranking
+Warframe Prime sets by profit and recent trading volume. It uses Warframe
+Market v2 for item metadata and orderbooks, and keeps the v1 statistics
+endpoint for 48-hour volume because that metric is not currently exposed by v2.
 
-A modern full-stack web application for analyzing Prime set profitability in Warframe using real-time market data from [Warframe Market](https://warframe.market). Features an interactive dark-themed dashboard with charts, real-time analysis progress, and historical trend tracking.
+## What It Does
 
-## Table of Contents
+- fetches all Prime set slugs from `/v2/items`
+- fetches each set's members and quantities from `/v2/item/{slug}/set`
+- fetches top sell orders from `/v2/orders/item/{slug}/top`
+- fetches 48-hour volume from `/v1/items/{slug}/statistics`
+- calculates set profit as average set price minus summed part costs
+- scores each set with weighted min-max normalization for profit and volume
+- writes a CSV artifact for each successful run
 
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Docker Deployment](#docker-deployment)
-- [Project Structure](#project-structure)
-- [API Reference](#api-reference)
-- [Configuration](#configuration)
-- [Tech Stack](#tech-stack)
-- [Contributing](#contributing)
-- [License](#license)
-- [Acknowledgments](#acknowledgments)
+## Requirements
 
-## Features
-
-### Real-Time Market Analysis
-- **Live Pricing Data**: Fetches current lowest prices for Prime sets and individual parts
-- **48-Hour Volume Analysis**: Trading volume data to identify active vs. stagnant markets
-- **Comprehensive Market Coverage**: Analyzes all available Prime sets automatically
-- **Historical Data Tracking**: SQLite database tracks profit and price trends over time
-- **Progress Streaming**: Real-time SSE updates during analysis
-
-### Interactive Dashboard
-- **Dark Theme UI**: Custom color scheme optimized for extended use
-- **Profit Charts**: Visual bar charts of top profitable sets
-- **Volume Charts**: Trading activity visualization
-- **Sortable Tables**: Sort by score, profit, volume, or ROI
-- **Expandable Rows**: Detailed part breakdown for each set
-
-### Advanced Scoring System
-- **Geometric Scoring Model**: `Score = (Profit * log10(Volume)) * ROI * TrendMultiplier / VolatilityPenalty`
-- **Strategy Profiles**: Safe & Steady, Balanced, Aggressive - each adjusts how factors contribute to score
-- **Trend & Volatility Analysis**: Evaluates price stability and market direction
-- **Real-Time Rescoring**: Switch strategies without re-fetching data
-
-### Full REST API
-- **FastAPI Backend**: Modern async Python API
-- **OpenAPI Documentation**: Auto-generated at `/docs`
-- **Background Tasks**: Long-running analysis runs asynchronously
-- **Export Capabilities**: JSON export of all analysis data
+- Python 3.10+
+- On Debian/Ubuntu, install `python3-venv` or `python3-virtualenv` if local
+  virtual environment creation is unavailable
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.12+
-- Node.js 22+
-- npm or yarn
+The repo ships with launchers that keep everything inside a repo-local
+`.venv/`, so packages do not land in your system Python.
 
-### Development Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
-   cd Warframe-Market-Set-Profit-Analyzer
-   ```
-
-2. **Start the Backend**
-   ```bash
-   cd backend
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload
-   ```
-   Backend runs at http://localhost:8000
-
-3. **Start the Frontend** (in a new terminal)
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   Frontend runs at http://localhost:5173
-
-4. **Open the application**
-
-   Navigate to http://localhost:5173 in your browser.
-
-## Docker Deployment
-
-Deploy the entire stack with Docker Compose:
+If `./run.sh` cannot create `.venv`, install Linux virtual environment support
+first. On Debian/Ubuntu that is:
 
 ```bash
-# Build and start containers
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop containers
-docker-compose down
+sudo apt install python3-venv python3-virtualenv
 ```
 
-Services:
-- **Frontend**: http://localhost:80
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
+### Fresh clone
 
-### Environment Variables
-
-Copy `.env.example` to `.env` and configure as needed:
+Clone the repo, enter it, then run the platform launcher to start the analyzer
+right away:
 
 ```bash
-cp .env.example .env
+git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
+cd Warframe-Market-Set-Profit-Analyzer
+./run.sh
 ```
 
-## Project Structure
+On Windows:
 
-```
-Warframe-Market-Set-Profit-Analyzer/
-├── backend/
-│   ├── app/
-│   │   ├── api/routes/        # FastAPI endpoints
-│   │   │   ├── analysis.py    # /api/analysis - run analysis, get results
-│   │   │   ├── history.py     # /api/history - historical runs
-│   │   │   ├── sets.py        # /api/sets - set information
-│   │   │   ├── stats.py       # /api/stats - database statistics
-│   │   │   └── export.py      # /api/export - data export
-│   │   ├── core/              # Business logic
-│   │   │   ├── scoring.py     # Geometric scoring engine
-│   │   │   ├── strategy_profiles.py  # Trading strategies
-│   │   │   ├── profit_calculator.py  # Margin calculations
-│   │   │   ├── rate_limiter.py       # API throttling
-│   │   │   └── cache_manager.py      # Data caching
-│   │   ├── services/          # External integrations
-│   │   │   ├── warframe_market.py    # Market API client
-│   │   │   └── analysis_service.py   # Analysis orchestration
-│   │   ├── models/schemas.py  # Pydantic models
-│   │   ├── db/database.py     # Async SQLite operations
-│   │   ├── config.py          # Settings management
-│   │   └── main.py            # FastAPI application
-│   ├── requirements.txt
-│   └── Dockerfile
-├── frontend/
-│   ├── src/
-│   │   ├── api/               # API client & types
-│   │   ├── components/        # React components
-│   │   │   ├── layout/        # Header, Layout
-│   │   │   ├── analysis/      # ProfitTable, ScoreBreakdown
-│   │   │   ├── charts/        # ProfitChart
-│   │   │   └── common/        # Button, Card, Loading
-│   │   ├── pages/             # Dashboard, Analysis, History, Export
-│   │   ├── hooks/             # useAnalysisProgress
-│   │   ├── store/             # Zustand state management
-│   │   └── App.tsx            # Root component
-│   ├── package.json
-│   ├── nginx.conf             # Production server config
-│   └── Dockerfile
-├── cache/                     # Runtime data (gitignored)
-├── docker-compose.yml
-├── .env.example
-└── LICENSE
+```powershell
+git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
+cd Warframe-Market-Set-Profit-Analyzer
+.\run.bat
 ```
 
-## API Reference
+PowerShell requires `.\` to run a script from the current folder.
 
-### Analysis Endpoints
+Each launcher will:
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/analysis` | Get latest analysis or run new if none exists |
-| `POST` | `/api/analysis` | Trigger background analysis |
-| `GET` | `/api/analysis/status` | Get current analysis status (JSON) |
-| `GET` | `/api/analysis/progress` | Stream analysis progress (SSE) |
-| `POST` | `/api/analysis/rescore` | Rescore results with new strategy |
-| `GET` | `/api/analysis/strategies` | List available strategy profiles |
+- create `.venv/` in the repo if it does not exist
+- upgrade `pip` inside that virtual environment
+- install or update the packaged CLI from the current checkout
+- run `wf-market-analyzer` with any extra arguments you pass through
 
-### Data Endpoints
+## Usage
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/history` | List all historical analysis runs |
-| `GET` | `/api/history/{run_id}` | Get specific run details |
-| `GET` | `/api/sets` | List all known Prime sets |
-| `GET` | `/api/sets/{slug}` | Get specific set details |
-| `GET` | `/api/stats` | Database statistics |
-| `GET` | `/api/export` | Export all data as JSON |
+The launchers are the easiest way to run the tool. Running them without extra
+flags starts the analyzer immediately:
 
-### API Documentation
+```bash
+./run.sh
+```
 
-Interactive API documentation is available at:
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+On Windows:
 
-## Configuration
+```powershell
+.\run.bat
+```
 
-### Environment Variables
+Inspect the full flag surface:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DEBUG` | `false` | Enable debug logging |
-| `DATABASE_PATH` | `cache/market_runs.sqlite` | SQLite database location |
-| `CACHE_DIR` | `cache` | Cache directory path |
-| `RATE_LIMIT_REQUESTS` | `3` | Max requests per window |
-| `RATE_LIMIT_WINDOW` | `1.0` | Rate limit window (seconds) |
-| `REQUEST_TIMEOUT` | `10` | HTTP request timeout (seconds) |
-| `ANALYSIS_TIMEOUT` | `600` | Max analysis duration (seconds) |
-| `CORS_ORIGINS` | `http://localhost:5173,...` | Allowed CORS origins |
+```bash
+./run.sh --help
+```
 
-### Strategy Profiles
+On Windows:
 
-The scoring engine uses strategy profiles that adjust how each factor contributes to the final score:
+```powershell
+.\run.bat --help
+```
 
-| Strategy | Description | Best For |
-|----------|-------------|----------|
-| **Safe & Steady** | Strong volatility penalty, lower trend emphasis. Requires higher liquidity (50+ volume) | Risk-averse traders seeking stable profits |
-| **Balanced** | Equal consideration of all factors. Moderate volume threshold (10+) | General trading, most users |
-| **Aggressive** | Tolerates volatility, emphasizes ROI and positive trends. Lower volume acceptable (5+) | Experienced traders seeking high gains |
+Example:
 
-## Tech Stack
+```bash
+./run.sh \
+  --profit-weight 1.0 \
+  --volume-weight 1.2 \
+  --price-sample-size 2 \
+  --requests-per-second 3 \
+  --timeout 20 \
+  --output-dir runs
+```
 
-### Backend
-- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern async Python web framework
-- **[Pydantic](https://docs.pydantic.dev/)** - Data validation and settings
-- **[httpx](https://www.python-httpx.org/)** - Async HTTP client
-- **[aiosqlite](https://aiosqlite.omnilib.dev/)** - Async SQLite database
-- **[uvicorn](https://www.uvicorn.org/)** - ASGI server
+On Windows, replace `./run.sh` with `.\run.bat`.
 
-### Frontend
-- **[React 19](https://react.dev/)** - UI framework
-- **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript
-- **[Vite](https://vitejs.dev/)** - Build tool and dev server
-- **[Tailwind CSS](https://tailwindcss.com/)** - Utility-first styling
-- **[Zustand](https://zustand-demo.pmnd.rs/)** - Lightweight state management
-- **[TanStack Query](https://tanstack.com/query/)** - Server state management
-- **[Recharts](https://recharts.org/)** - Chart library
-- **[React Router](https://reactrouter.com/)** - Client-side routing
+By default, each run produces a timestamped CSV artifact with a unique run ID,
+for example:
 
-### Infrastructure
-- **[Docker](https://www.docker.com/)** - Containerization
-- **[Nginx](https://nginx.org/)** - Reverse proxy and static serving
+```text
+runs/set_profit_analysis_20260305_141516_a1b2c3d4.csv
+```
 
-## Contributing
+If you need a fixed location for downstream automation, pass `--output-file`.
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on:
+## Manual Environment Setup
 
-- Setting up the development environment
-- Code style and conventions
-- Pull request process
-- Areas where help is needed
+If you prefer to manage the environment yourself, keep the install inside a
+virtual environment:
 
-### Quick Contribution Ideas
-- Add test coverage (pytest for backend, Vitest for frontend)
-- Performance optimizations
-- New analysis metrics or visualizations
-- Documentation improvements
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install .
+wf-market-analyzer --help
+```
+
+On Windows:
+
+```powershell
+py -3 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install .
+wf-market-analyzer --help
+```
+
+## Scoring Model
+
+```text
+Score = normalized_profit * profit_weight + normalized_volume * volume_weight
+```
+
+Default weights:
+
+- `profit_weight = 1.0`
+- `volume_weight = 1.2`
+- `price_sample_size = 2`
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- [Warframe Market](https://warframe.market) for providing the excellent public API
-- [Digital Extremes](https://www.digitalextremes.com/) for creating Warframe
-- The Warframe trading community for inspiration
-
----
-
-**Happy Trading, Tenno!**
+MIT. See [LICENSE](LICENSE).

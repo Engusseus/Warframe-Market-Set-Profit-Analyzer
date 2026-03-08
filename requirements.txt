@@ -1,0 +1,4 @@
+# Runtime dependencies only.
+# For local development, install the package with dev extras instead:
+#   pip install -e ".[dev]"
+httpx>=0.27,<1.0
