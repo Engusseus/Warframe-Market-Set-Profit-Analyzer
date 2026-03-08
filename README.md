@@ -35,42 +35,24 @@ sudo apt install python3-venv python3-virtualenv
 
 ### Fresh clone
 
-Clone the repo, enter it, then run the platform launcher:
+Clone the repo, enter it, then run the platform launcher to start the analyzer
+right away:
 
 ```bash
 git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
 cd Warframe-Market-Set-Profit-Analyzer
-./run.sh --help
-```
-
-On Windows:
-
-```powershell
-git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
-cd Warframe-Market-Set-Profit-Analyzer
-.\run.bat --help
-```
-
-PowerShell requires `.\` to run a script from the current folder.
-
-### Update an existing checkout
-
-If you are following the `dev` branch, pull the latest changes and rerun the
-launcher:
-
-```bash
-git checkout dev
-git pull
 ./run.sh
 ```
 
 On Windows:
 
 ```powershell
-git checkout dev
-git pull
+git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
+cd Warframe-Market-Set-Profit-Analyzer
 .\run.bat
 ```
+
+PowerShell requires `.\` to run a script from the current folder.
 
 Each launcher will:
 
@@ -81,7 +63,8 @@ Each launcher will:
 
 ## Usage
 
-The launchers are the easiest way to run the tool:
+The launchers are the easiest way to run the tool. Running them without extra
+flags starts the analyzer immediately:
 
 ```bash
 ./run.sh
