@@ -48,8 +48,10 @@ On Windows:
 ```powershell
 git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
 cd Warframe-Market-Set-Profit-Analyzer
-run.bat --help
+.\run.bat --help
 ```
+
+PowerShell requires `.\` to run a script from the current folder.
 
 ### Update an existing checkout
 
@@ -67,7 +69,7 @@ On Windows:
 ```powershell
 git checkout dev
 git pull
-run.bat
+.\run.bat
 ```
 
 Each launcher will:
@@ -88,7 +90,7 @@ The launchers are the easiest way to run the tool:
 On Windows:
 
 ```powershell
-run.bat
+.\run.bat
 ```
 
 Inspect the full flag surface:
@@ -100,7 +102,7 @@ Inspect the full flag surface:
 On Windows:
 
 ```powershell
-run.bat --help
+.\run.bat --help
 ```
 
 Example:
@@ -115,7 +117,7 @@ Example:
   --output-dir runs
 ```
 
-On Windows, replace `./run.sh` with `run.bat`.
+On Windows, replace `./run.sh` with `.\run.bat`.
 
 By default, each run produces a timestamped CSV artifact with a unique run ID,
 for example:
@@ -160,73 +162,6 @@ Default weights:
 - `profit_weight = 1.0`
 - `volume_weight = 1.2`
 - `price_sample_size = 2`
-
-## Output Columns
-
-- `Run Timestamp`
-- `Set Name`
-- `Set Slug`
-- `Profit`
-- `Set Selling Price`
-- `Part Costs Total`
-- `Volume (48h)`
-- `Score`
-- `Part Prices`
-
-## Configuration
-
-The CLI resolves settings in this order:
-
-1. command-line flags
-2. environment variables prefixed with `WF_MARKET_ANALYZER_`
-3. built-in defaults from [`config.py`](config.py)
-
-Common examples:
-
-- `WF_MARKET_ANALYZER_OUTPUT_DIR=/srv/wfm/runs`
-- `WF_MARKET_ANALYZER_OUTPUT_FILE=/srv/wfm/latest.csv`
-- `WF_MARKET_ANALYZER_PLATFORM=pc`
-- `WF_MARKET_ANALYZER_LANGUAGE=en`
-- `WF_MARKET_ANALYZER_CROSSPLAY=true`
-- `WF_MARKET_ANALYZER_REQUESTS_PER_SECOND=3`
-- `WF_MARKET_ANALYZER_TIMEOUT=20`
-- `WF_MARKET_ANALYZER_MAX_RETRIES=3`
-- `WF_MARKET_ANALYZER_LOG_LEVEL=INFO`
-- `WF_MARKET_ANALYZER_LOG_FILE=/srv/wfm/logs/analyzer.log`
-- `WF_MARKET_ANALYZER_JSON_SUMMARY=true`
-- `WF_MARKET_ANALYZER_ALLOW_THIN_ORDERBOOKS=false`
-
-## Production Notes
-
-### Operational defaults
-
-- logs go to `stderr` by default
-- file logging is optional and rotated when `--log-file` is set
-- outputs are written atomically
-- thin orderbooks are rejected by default unless `--allow-thin-orderbooks` is enabled
-- malformed quantities or volume payloads are treated as invalid data and skipped instead of being silently coerced
-
-### Useful flags
-
-- `--output-file`: write to a stable target path instead of a timestamped file
-- `--json-summary`: emit a machine-readable run summary to `stdout`
-- `--log-file`: additionally write rotated logs to disk
-- `--log-level`: set `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`
-- `--crossplay` / `--no-crossplay`: override the request header explicitly
-- `--allow-thin-orderbooks` / `--no-allow-thin-orderbooks`: opt in or out of sparse-price analysis
-
-### Exit codes
-
-- `0`: analysis completed successfully
-- `1`: unrecoverable runtime or API failure
-- `2`: invalid local configuration
-- `130`: interrupted by `Ctrl+C` / `KeyboardInterrupt`
-
-### Cron example
-
-```cron
-0 */6 * * * /srv/wf-market-analyzer/bin/wf-market-analyzer --output-file /srv/wf-market-analyzer/runs/latest.csv --log-file /srv/wf-market-analyzer/logs/analyzer.log --json-summary >> /srv/wf-market-analyzer/logs/job.json 2>> /srv/wf-market-analyzer/logs/job.stderr
-```
 
 ## License
 
