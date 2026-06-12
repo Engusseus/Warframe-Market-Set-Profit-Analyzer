@@ -16,7 +16,6 @@ _bmad/
 
 # Local-only repository artifacts
 docs/local/
-.github/workflows/
 
 # Python cache and test artifacts
 __pycache__/

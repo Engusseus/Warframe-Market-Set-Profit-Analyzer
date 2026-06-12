@@ -45,12 +45,15 @@ from config import (
     PROFIT_WEIGHT,
     REQUEST_TIMEOUT_SECONDS,
     REQUESTS_PER_SECOND,
+    USER_AGENT,
     VOLUME_WEIGHT,
 )
 
 logger = logging.getLogger("wf_market_analyzer")
 TOP_ORDER_SAMPLE_LIMIT = 5
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504, 509}
+RETRY_AFTER_CAP_SECONDS = 60.0
+ERROR_BODY_LOG_LIMIT = 500
 
 
 def generate_run_id() -> str:
@@ -67,6 +70,7 @@ def build_request_headers(platform: str, language: str, crossplay: bool) -> dict
         "Language": language,
         "Crossplay": str(crossplay).lower(),
         "Accept": "application/json",
+        "User-Agent": USER_AGENT,
     }
 
 
@@ -245,6 +249,26 @@ def parse_required_non_negative_int(value: Any) -> int | None:
     if not math.isfinite(parsed) or parsed < 0 or not parsed.is_integer():
         return None
     return int(parsed)
+
+
+def parse_retry_after_seconds(value: str | None) -> float | None:
+    """Parse a seconds-form Retry-After header, capped against hostile values."""
+
+    if value is None:
+        return None
+    parsed = safe_float(value.strip(), default=math.nan)
+    if not math.isfinite(parsed) or parsed < 0:
+        return None
+    return min(parsed, RETRY_AFTER_CAP_SECONDS)
+
+
+def summarize_response_body(body: str, limit: int = ERROR_BODY_LOG_LIMIT) -> str:
+    """Collapse whitespace and bound length so error bodies cannot flood logs."""
+
+    collapsed = " ".join(body.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return f"{collapsed[:limit]}... [truncated {len(collapsed) - limit} chars]"
 
 
 def extract_item_name(item: dict[str, Any], fallback_slug: str) -> str:
@@ -498,7 +522,11 @@ class WarframeMarketClient:
                 )
                 if attempt == self.settings.max_retries:
                     return None
-                await asyncio.sleep(backoff_seconds)
+                retry_after = parse_retry_after_seconds(response.headers.get("Retry-After"))
+                delay = backoff_seconds
+                if retry_after is not None:
+                    delay = max(retry_after, backoff_seconds)
+                await asyncio.sleep(delay)
                 backoff_seconds *= 2
                 continue
 
@@ -510,7 +538,7 @@ class WarframeMarketClient:
                 "Non-retryable HTTP %s from %s: %s",
                 response.status_code,
                 url,
-                response.text,
+                summarize_response_body(response.text),
             )
             return None
 
@@ -958,43 +986,133 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description=(
             "Analyze Warframe Prime set profitability using v2 item/orderbook "
             "endpoints and the v1 statistics endpoint."
-        )
+        ),
+        epilog=(
+            "Every option can also be set through an environment variable named "
+            f"{ENV_PREFIX}_<OPTION>, for example {ENV_PREFIX}_PROFIT_WEIGHT. "
+            "CLI flags take precedence over environment variables."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
-    parser.add_argument("--profit-weight", type=non_negative_finite_float, default=None)
-    parser.add_argument("--volume-weight", type=non_negative_finite_float, default=None)
+    parser.add_argument(
+        "--profit-weight",
+        type=non_negative_finite_float,
+        default=None,
+        help=f"weight applied to normalized profit in the score (default: {PROFIT_WEIGHT})",
+    )
+    parser.add_argument(
+        "--volume-weight",
+        type=non_negative_finite_float,
+        default=None,
+        help=f"weight applied to normalized 48h volume in the score (default: {VOLUME_WEIGHT})",
+    )
     parser.add_argument(
         "--price-sample-size",
         type=price_sample_size_arg,
         default=None,
+        help=(
+            "number of lowest sell orders averaged per item, "
+            f"1-{TOP_ORDER_SAMPLE_LIMIT} (default: {PRICE_SAMPLE_SIZE})"
+        ),
     )
-    parser.add_argument("--requests-per-second", type=positive_float, default=None)
-    parser.add_argument("--timeout", type=positive_float, default=None)
-    parser.add_argument("--max-retries", type=positive_int, default=None)
-    parser.add_argument("--platform", type=non_empty_string, default=None)
-    parser.add_argument("--language", type=non_empty_string, default=None)
-    parser.add_argument("--api-v1-url", type=non_empty_string, default=None)
-    parser.add_argument("--api-v2-url", type=non_empty_string, default=None)
-    parser.add_argument("--output-dir", type=non_empty_string, default=None)
-    parser.add_argument("--output-prefix", type=non_empty_string, default=None)
-    parser.add_argument("--output-file", type=non_empty_string, default=None)
-    parser.add_argument("--log-level", type=log_level_arg, default=None)
-    parser.add_argument("--log-file", type=non_empty_string, default=None)
-    parser.add_argument("--debug", action="store_true", default=None)
+    parser.add_argument(
+        "--requests-per-second",
+        type=positive_float,
+        default=None,
+        help=f"global API request pace (default: {REQUESTS_PER_SECOND})",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=positive_float,
+        default=None,
+        help=f"per-request timeout in seconds (default: {REQUEST_TIMEOUT_SECONDS})",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=positive_int,
+        default=None,
+        help=f"maximum attempts per request, including the first (default: {MAX_RETRIES})",
+    )
+    parser.add_argument(
+        "--platform",
+        type=non_empty_string,
+        default=None,
+        help=f"platform header sent to the API (default: {DEFAULT_PLATFORM})",
+    )
+    parser.add_argument(
+        "--language",
+        type=non_empty_string,
+        default=None,
+        help=f"language header sent to the API (default: {DEFAULT_LANGUAGE})",
+    )
+    parser.add_argument(
+        "--api-v1-url",
+        type=non_empty_string,
+        default=None,
+        help=f"base URL for the v1 API (default: {API_V1_URL})",
+    )
+    parser.add_argument(
+        "--api-v2-url",
+        type=non_empty_string,
+        default=None,
+        help=f"base URL for the v2 API (default: {API_V2_URL})",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=non_empty_string,
+        default=None,
+        help=f"directory for timestamped CSV artifacts (default: {DEFAULT_OUTPUT_DIR})",
+    )
+    parser.add_argument(
+        "--output-prefix",
+        type=non_empty_string,
+        default=None,
+        help=f"filename prefix for CSV artifacts (default: {DEFAULT_OUTPUT_PREFIX})",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=non_empty_string,
+        default=None,
+        help="exact output CSV path, overriding --output-dir and --output-prefix",
+    )
+    parser.add_argument(
+        "--log-level",
+        type=log_level_arg,
+        default=None,
+        help=f"log verbosity: DEBUG, INFO, WARNING, ERROR, or CRITICAL (default: {DEFAULT_LOG_LEVEL})",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=non_empty_string,
+        default=None,
+        help="optional path for a rotated log file (default: stderr only)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=None,
+        help="enable DEBUG logging, including httpx request logs",
+    )
     parser.add_argument(
         "--crossplay",
         action=argparse.BooleanOptionalAction,
         default=None,
+        help=f"include crossplay orders (default: {DEFAULT_CROSSPLAY})",
     )
     parser.add_argument(
         "--allow-thin-orderbooks",
         action=argparse.BooleanOptionalAction,
         default=None,
+        help=(
+            "rank sets even when fewer sell orders than --price-sample-size exist "
+            f"(default: {ALLOW_THIN_ORDERBOOKS})"
+        ),
     )
     parser.add_argument(
         "--json-summary",
         action=argparse.BooleanOptionalAction,
         default=None,
+        help=f"print the run summary as JSON instead of text (default: {JSON_SUMMARY})",
     )
     return parser.parse_args(argv)
 

@@ -175,6 +175,117 @@ def test_client_retries_documented_transient_509(monkeypatch):
     assert attempts["items"] == 2
 
 
+def test_client_sends_identifying_user_agent():
+    captured_headers: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured_headers.update(request.headers)
+        return httpx.Response(200, json={"data": []})
+
+    settings = RuntimeConfig(requests_per_second=1000.0, max_retries=1, debug=False)
+
+    async def scenario():
+        client = WarframeMarketClient(settings, transport=httpx.MockTransport(handler))
+        try:
+            return await client._get_json("https://example.test/endpoint")
+        finally:
+            await client.close()
+
+    run(scenario())
+
+    user_agent = captured_headers.get("user-agent", "")
+    assert "wf-market-analyzer" in user_agent
+    assert "github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer" in user_agent
+
+
+def test_client_honors_retry_after_header_on_429(monkeypatch):
+    recorded_delays: list[float] = []
+
+    async def recording_sleep(delay: float) -> None:
+        recorded_delays.append(delay)
+
+    monkeypatch.setattr("wf_market_analyzer.asyncio.sleep", recording_sleep)
+
+    attempts = {"count": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "7"}, json={})
+        return httpx.Response(200, json={"data": []})
+
+    settings = RuntimeConfig(requests_per_second=1000.0, max_retries=2, debug=False)
+
+    async def scenario():
+        client = WarframeMarketClient(settings, transport=httpx.MockTransport(handler))
+        try:
+            return await client._get_json("https://example.test/endpoint")
+        finally:
+            await client.close()
+
+    result = run(scenario())
+
+    assert result == {"data": []}
+    assert attempts["count"] == 2
+    assert 7.0 in recorded_delays
+
+
+def test_client_caps_hostile_retry_after_header(monkeypatch):
+    recorded_delays: list[float] = []
+
+    async def recording_sleep(delay: float) -> None:
+        recorded_delays.append(delay)
+
+    monkeypatch.setattr("wf_market_analyzer.asyncio.sleep", recording_sleep)
+
+    attempts = {"count": 0}
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return httpx.Response(429, headers={"Retry-After": "999999"}, json={})
+        return httpx.Response(200, json={"data": []})
+
+    settings = RuntimeConfig(requests_per_second=1000.0, max_retries=2, debug=False)
+
+    async def scenario():
+        client = WarframeMarketClient(settings, transport=httpx.MockTransport(handler))
+        try:
+            return await client._get_json("https://example.test/endpoint")
+        finally:
+            await client.close()
+
+    run(scenario())
+
+    assert recorded_delays
+    assert max(recorded_delays) <= 60.0
+
+
+def test_client_truncates_long_error_bodies_in_logs(caplog):
+    huge_body = "A" * 100_000 + "\nINJECTED LINE"
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, text=huge_body)
+
+    settings = RuntimeConfig(requests_per_second=1000.0, max_retries=1, debug=False)
+
+    async def scenario():
+        client = WarframeMarketClient(settings, transport=httpx.MockTransport(handler))
+        try:
+            return await client._get_json("https://example.test/endpoint")
+        finally:
+            await client.close()
+
+    with caplog.at_level("ERROR", logger="wf_market_analyzer"):
+        assert run(scenario()) is None
+
+    error_messages = [record.getMessage() for record in caplog.records]
+    assert error_messages
+    for message in error_messages:
+        assert len(message) < 2_000
+        assert "\nINJECTED LINE" not in message
+
+
 def test_client_handles_http_error_invalid_json_and_non_dict_payload(monkeypatch):
     monkeypatch.setattr("wf_market_analyzer.asyncio.sleep", immediate_sleep)
 

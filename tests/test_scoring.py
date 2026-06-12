@@ -3,6 +3,7 @@ import logging
 
 import pytest
 
+from config import USER_AGENT
 from wf_market_analyzer import (
     PriceData,
     ResultRow,
@@ -22,10 +23,12 @@ from wf_market_analyzer import (
     non_negative_int,
     parse_required_non_negative_int,
     parse_required_positive_int,
+    parse_retry_after_seconds,
     positive_float,
     positive_int,
     safe_float,
     score_results,
+    summarize_response_body,
 )
 
 
@@ -59,6 +62,7 @@ def test_generate_run_id_and_build_request_headers():
         "Language": "en",
         "Crossplay": "true",
         "Accept": "application/json",
+        "User-Agent": USER_AGENT,
     }
 
 
@@ -98,6 +102,33 @@ def test_parse_required_positive_int(value, expected):
 )
 def test_parse_required_non_negative_int(value, expected):
     assert parse_required_non_negative_int(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("bad", None),
+        ("-1", None),
+        ("nan", None),
+        ("inf", None),
+        ("0", 0.0),
+        ("7", 7.0),
+        (" 2.5 ", 2.5),
+        ("999999", 60.0),
+    ],
+)
+def test_parse_retry_after_seconds(value, expected):
+    assert parse_retry_after_seconds(value) == expected
+
+
+def test_summarize_response_body_collapses_whitespace_and_truncates():
+    assert summarize_response_body("short\nbody") == "short body"
+    summary = summarize_response_body("x" * 1_000, limit=100)
+    assert summary.startswith("x" * 100)
+    assert summary.endswith("[truncated 900 chars]")
+    assert len(summary) < 200
 
 
 def test_extract_item_name_uses_i18n_then_name_then_slug():

@@ -1,5 +1,10 @@
 # Warframe Market Set Profit Analyzer
 
+[![CI](https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/actions/workflows/ci.yml/badge.svg)](https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Engusseus/Warframe-Market-Set-Profit-Analyzer)](https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/releases)
+
 `warframe-market-set-profit-analyzer` is a packaged Python CLI for ranking
 Warframe Prime sets by profit and recent trading volume. It uses Warframe
 Market v2 for item metadata and orderbooks, and keeps the v1 statistics
@@ -15,9 +20,13 @@ endpoint for 48-hour volume because that metric is not currently exposed by v2.
 - scores each set with weighted min-max normalization for profit and volume
 - writes a CSV artifact for each successful run
 
+The analyzer is a polite API citizen: it paces requests (3 per second by
+default), identifies itself with a project `User-Agent`, and honors
+`Retry-After` when the API asks it to slow down.
+
 ## Requirements
 
-- Python 3.10+
+- Python 3.10 to 3.14
 - On Debian/Ubuntu, install `python3-venv` or `python3-virtualenv` if local
   virtual environment creation is unavailable
 
@@ -111,6 +120,32 @@ runs/set_profit_analysis_20260305_141516_a1b2c3d4.csv
 
 If you need a fixed location for downstream automation, pass `--output-file`.
 
+## Configuration
+
+Every CLI flag can also be supplied through an environment variable named
+`WF_MARKET_ANALYZER_<OPTION>`. CLI flags take precedence over environment
+variables, which take precedence over built-in defaults. For example:
+
+```bash
+export WF_MARKET_ANALYZER_PROFIT_WEIGHT=2.0
+export WF_MARKET_ANALYZER_OUTPUT_DIR=/var/data/wfma
+export WF_MARKET_ANALYZER_JSON_SUMMARY=true
+wf-market-analyzer
+```
+
+Commonly tuned options:
+
+| Option | Env var | Default | Meaning |
+| --- | --- | --- | --- |
+| `--profit-weight` | `WF_MARKET_ANALYZER_PROFIT_WEIGHT` | `1.0` | Weight of normalized profit in the score |
+| `--volume-weight` | `WF_MARKET_ANALYZER_VOLUME_WEIGHT` | `1.2` | Weight of normalized 48h volume in the score |
+| `--price-sample-size` | `WF_MARKET_ANALYZER_PRICE_SAMPLE_SIZE` | `2` | Lowest sell orders averaged per item (1-5) |
+| `--requests-per-second` | `WF_MARKET_ANALYZER_REQUESTS_PER_SECOND` | `3.0` | Global API request pace |
+| `--platform` | `WF_MARKET_ANALYZER_PLATFORM` | `pc` | Platform header sent to the API |
+| `--json-summary` | `WF_MARKET_ANALYZER_JSON_SUMMARY` | `false` | Print the run summary as JSON for automation |
+
+Run `wf-market-analyzer --help` for the complete list with descriptions.
+
 ## Manual Environment Setup
 
 If you prefer to manage the environment yourself, keep the install inside a
@@ -145,6 +180,24 @@ Default weights:
 - `profit_weight = 1.0`
 - `volume_weight = 1.2`
 - `price_sample_size = 2`
+
+## Development
+
+Install the package with dev extras, then run the same checks CI runs:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest        # tests with coverage (90% minimum enforced)
+python -m ruff check .  # lint
+python -m mypy          # type check
+```
+
+CI runs the test suite on Python 3.10 through 3.14 and audits runtime
+dependencies with pip-audit on every push and pull request.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
