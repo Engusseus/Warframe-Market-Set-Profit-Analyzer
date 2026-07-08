@@ -32,11 +32,13 @@ default), identifies itself with a project `User-Agent`, and honors
 
 ## Quick Start
 
-The repo ships with launchers that keep everything inside a repo-local
-`.venv/`, so packages do not land in your system Python.
+The repo ships with launchers that run the analyzer from a repo-local
+`.venv/`, so packages do not land in your system Python. The launchers do not
+create environments, upgrade packaging tools, or install dependencies during
+startup; run the setup commands explicitly first.
 
-If `./run.sh` cannot create `.venv`, install Linux virtual environment support
-first. On Debian/Ubuntu that is:
+If `python3 -m venv .venv` cannot create `.venv`, install Linux virtual
+environment support first. On Debian/Ubuntu that is:
 
 ```bash
 sudo apt install python3-venv python3-virtualenv
@@ -44,12 +46,15 @@ sudo apt install python3-venv python3-virtualenv
 
 ### Fresh clone
 
-Clone the repo, enter it, then run the platform launcher to start the analyzer
-right away:
+Clone the repo, enter it, then create the local environment and install the
+analyzer:
 
 ```bash
 git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
 cd Warframe-Market-Set-Profit-Analyzer
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install .
 ./run.sh
 ```
 
@@ -58,17 +63,16 @@ On Windows:
 ```powershell
 git clone https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer.git
 cd Warframe-Market-Set-Profit-Analyzer
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install .
 .\run.bat
 ```
 
 PowerShell requires `.\` to run a script from the current folder.
 
-Each launcher will:
-
-- create `.venv/` in the repo if it does not exist
-- upgrade `pip` inside that virtual environment
-- install or update the packaged CLI from the current checkout
-- run `wf-market-analyzer` with any extra arguments you pass through
+After setup, each launcher runs `wf-market-analyzer` from `.venv/` with any
+extra arguments you pass through.
 
 ## Usage
 
