@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import tempfile
 import time
@@ -374,11 +375,15 @@ def format_part_prices(result: ResultRow) -> str:
 
 
 def sanitize_spreadsheet_cell(value: str) -> str:
-    """Prevent untrusted CSV text from being interpreted as a formula."""
+    """Escape formulas at cell starts, including alternate import boundaries."""
 
-    if value.startswith(("=", "+", "-", "@", "\t", "\r")):
-        return f"'{value}"
-    return value
+    # A spreadsheet may split comma-CSV text on semicolons, tabs, or line breaks.
+    # Insert before spaces/quotes that an importer could discard at each boundary.
+    return re.sub(
+        r'(?:^|(?<=[,;\t\r\n]))(?=[ "]*[=+\-@\t\r\n])',
+        "'",
+        value,
+    )
 
 
 def build_output_path(
