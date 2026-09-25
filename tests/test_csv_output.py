@@ -1,6 +1,8 @@
 import csv
 from datetime import datetime
 
+import pytest
+
 from wf_market_analyzer import (
     PriceData,
     ResultRow,
@@ -8,6 +10,7 @@ from wf_market_analyzer import (
     VolumeData,
     build_output_path,
     format_part_prices,
+    sanitize_spreadsheet_cell,
     write_results_to_csv,
 )
 
@@ -115,6 +118,30 @@ def test_write_results_to_csv_preserves_row_order(tmp_path):
         "beta_prime_set",
         "alpha_prime_set",
     ]
+
+
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r"])
+def test_sanitize_spreadsheet_cell_escapes_formula_prefixes(prefix):
+    value = f"{prefix}malicious formula"
+
+    assert sanitize_spreadsheet_cell(value) == f"'{value}"
+
+
+def test_write_results_to_csv_sanitizes_untrusted_text(tmp_path):
+    result = sample_result(slug='=HYPERLINK("https://example.test")_prime_set')
+    result.set_data.name = '+WEBSERVICE("https://example.test")'
+    first_part = next(iter(result.set_data.parts))
+    result.set_data.part_names[first_part] = "@SUM(1+1)"
+    output_path = tmp_path / "sanitized.csv"
+
+    write_results_to_csv([result], output_path)
+
+    with output_path.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+
+    assert row["Set Name"].startswith("'+")
+    assert row["Set Slug"].startswith("'=")
+    assert row["Part Prices"].startswith("'@")
 
 
 def test_format_part_prices_handles_empty_parts():
