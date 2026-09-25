@@ -1,6 +1,8 @@
 import csv
 from datetime import datetime
 
+import pytest
+
 from wf_market_analyzer import (
     PriceData,
     ResultRow,
@@ -8,6 +10,7 @@ from wf_market_analyzer import (
     VolumeData,
     build_output_path,
     format_part_prices,
+    sanitize_spreadsheet_cell,
     write_results_to_csv,
 )
 
@@ -77,11 +80,14 @@ def test_build_output_path_respects_output_file_and_run_id(tmp_path):
     assert with_run_id.name == "set_profit_analysis_20260305_141516_abc12345.csv"
 
 
-def test_write_results_to_csv_writes_expected_columns_atomically(tmp_path):
+@pytest.mark.parametrize("profit", [88.0, -88.0])
+def test_write_results_to_csv_writes_expected_columns_atomically(tmp_path, profit):
     output_path = tmp_path / "results.csv"
     output_path.write_text("old-data", encoding="utf-8")
+    result = sample_result()
+    result.price_data.profit = profit
 
-    write_results_to_csv([sample_result()], output_path)
+    write_results_to_csv([result], output_path)
 
     leftovers = list(tmp_path.glob(".*.tmp"))
     with output_path.open(newline="", encoding="utf-8") as handle:
@@ -92,7 +98,7 @@ def test_write_results_to_csv_writes_expected_columns_atomically(tmp_path):
     assert rows[0]["Run Timestamp"] == "2026-03-05T14:15:16-05:00"
     assert rows[0]["Set Name"] == "Alpha Prime Set"
     assert rows[0]["Set Slug"] == "alpha_prime_set"
-    assert rows[0]["Profit"] == "88.0"
+    assert rows[0]["Profit"] == f"{profit:.1f}"
     assert rows[0]["Score"] == "0.8123"
     assert rows[0]["Part Prices"] == (
         "Alpha Prime Blueprint (x1): 11.0; alpha_prime_barrel (x2): 3.0"
@@ -115,6 +121,91 @@ def test_write_results_to_csv_preserves_row_order(tmp_path):
         "beta_prime_set",
         "alpha_prime_set",
     ]
+
+
+@pytest.mark.parametrize("prefix", ["=", "+", "-", "@", "\t", "\r", "\n"])
+def test_sanitize_spreadsheet_cell_escapes_formula_prefixes(prefix):
+    value = f"{prefix}malicious formula"
+
+    assert sanitize_spreadsheet_cell(value) == f"'{value}"
+
+
+@pytest.mark.parametrize("value", [
+    "",
+    "Alpha Prime Set",
+    "alpha_prime_set",
+    "Équinoxe Prime",
+    'Alpha "Prime", Set; Parts',
+    "Alpha-Prime + Beta @ 10",
+    "Alpha Prime Blueprint (x1): 11.0; alpha_prime_barrel (x2): 3.0",
+])
+def test_sanitize_spreadsheet_cell_preserves_ordinary_text(value):
+    assert sanitize_spreadsheet_cell(value) == value
+
+
+@pytest.mark.parametrize("delimiter", [",", ";", "\t"])
+@pytest.mark.parametrize("field", [
+    "set_name", "set_slug", "first_part_name", "later_part_name", "part_slug",
+])
+@pytest.mark.parametrize("payload", [
+    "\n=1+1",
+    "=1+1",
+    "Safe;=1+1;",
+    "Safe; =1+1;",
+    'Safe;"=1+1";',
+    'Safe; "=1+1";',
+    "Safe;\t=1+1;",
+    "Safe\r\n=1+1",
+    "Safe\t=1+1\t",
+    "Safe,=1+1,",
+    "Safe;=1+1;+1+1;-1+1;@SUM(1);",
+])
+def test_write_results_to_csv_neutralizes_formulas_at_import_boundaries(
+    tmp_path, delimiter, field, payload,
+):
+    result = sample_result()
+    if field == "set_name":
+        result.set_data.name = payload
+    elif field == "set_slug":
+        result.set_data.slug = payload
+    elif field == "part_slug":
+        part_slug = "alpha_prime_barrel"
+        result.set_data.parts[payload] = result.set_data.parts.pop(part_slug)
+        result.price_data.part_prices[payload] = result.price_data.part_prices.pop(part_slug)
+    else:
+        part_slug = (
+            "alpha_prime_blueprint" if field == "first_part_name" else "alpha_prime_barrel"
+        )
+        result.set_data.part_names[part_slug] = payload
+    output_path = tmp_path / "sanitized.csv"
+
+    write_results_to_csv([result], output_path)
+
+    # Parse the entire artifact: quoting differs when the importer uses another delimiter.
+    with output_path.open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle, delimiter=delimiter, skipinitialspace=True))
+
+    assert len(rows) >= 2
+    for row in rows:
+        for cell in row:
+            assert not cell.startswith(("=", "+", "-", "@", "\t", "\r", "\n")), repr(cell)
+
+
+def test_write_results_to_csv_sanitizes_untrusted_text(tmp_path):
+    result = sample_result(slug='=HYPERLINK("https://example.test")_prime_set')
+    result.set_data.name = '+WEBSERVICE("https://example.test")'
+    first_part = next(iter(result.set_data.parts))
+    result.set_data.part_names[first_part] = "@SUM(1+1)"
+    output_path = tmp_path / "sanitized.csv"
+
+    write_results_to_csv([result], output_path)
+
+    with output_path.open(newline="", encoding="utf-8") as handle:
+        row = next(csv.DictReader(handle))
+
+    assert row["Set Name"].startswith("'+")
+    assert row["Set Slug"].startswith("'=")
+    assert row["Part Prices"].startswith("'@")
 
 
 def test_format_part_prices_handles_empty_parts():

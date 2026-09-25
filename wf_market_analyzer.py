@@ -10,6 +10,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import tempfile
 import time
@@ -373,6 +374,18 @@ def format_part_prices(result: ResultRow) -> str:
     return "; ".join(formatted_parts)
 
 
+def sanitize_spreadsheet_cell(value: str) -> str:
+    """Escape formulas at cell starts, including alternate import boundaries."""
+
+    # A spreadsheet may split comma-CSV text on semicolons, tabs, or line breaks.
+    # Insert before spaces/quotes that an importer could discard at each boundary.
+    return re.sub(
+        r'(?:^|(?<=[,;\t\r\n]))(?=[ "]*[=+\-@\t\r\n])',
+        "'",
+        value,
+    )
+
+
 def build_output_path(
     output_dir: Path,
     completed_at: datetime,
@@ -434,14 +447,14 @@ def write_results_to_csv(results: list[ResultRow], output_path: Path) -> None:
                 writer.writerow(
                     {
                         "Run Timestamp": result.run_timestamp,
-                        "Set Name": result.set_data.name,
-                        "Set Slug": result.set_data.slug,
+                        "Set Name": sanitize_spreadsheet_cell(result.set_data.name),
+                        "Set Slug": sanitize_spreadsheet_cell(result.set_data.slug),
                         "Profit": f"{result.price_data.profit:.1f}",
                         "Set Selling Price": f"{result.price_data.set_price:.1f}",
                         "Part Costs Total": f"{result.price_data.total_part_cost:.1f}",
                         "Volume (48h)": result.volume_data.volume_48h,
                         "Score": f"{result.score:.4f}",
-                        "Part Prices": format_part_prices(result),
+                        "Part Prices": sanitize_spreadsheet_cell(format_part_prices(result)),
                     }
                 )
 
