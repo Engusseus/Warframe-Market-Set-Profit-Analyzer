@@ -1,7 +1,7 @@
 """Default configuration for the Warframe Market CLI analyzer."""
 
 APP_NAME = "Warframe Market Set Profit Analyzer"
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.5.2"
 ENV_PREFIX = "WF_MARKET_ANALYZER"
 PROJECT_URL = "https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer"
 USER_AGENT = f"wf-market-analyzer/{APP_VERSION} (+{PROJECT_URL})"

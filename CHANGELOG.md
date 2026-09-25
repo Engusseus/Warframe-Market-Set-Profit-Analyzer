@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-09-25
+
+### Security
+
+- Escape spreadsheet formula prefixes in API-derived set names, set slugs,
+  and part-price text at the CSV output boundary.
+- Protect against line-feed-prefixed formulas and formulas exposed by alternate
+  spreadsheet delimiters, including intervening spaces and quotes.
+
+### Added
+
+- Regression coverage for formula prefixes across all API-derived CSV text
+  columns and comma, semicolon, and tab imports, while preserving ordinary
+  text, numeric values, and atomic CSV output.
+
+### Changed
+
+- Updated GitHub Actions checkout and Python setup actions to v7 and expanded
+  the supported mypy development dependency range to include 2.x.
+
 ## [0.5.1] - 2026-07-08
 
 ### Added
@@ -73,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial CLI analyzer for ranking Warframe Prime sets by profit and volume.
 
+[0.5.2]: https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Engusseus/Warframe-Market-Set-Profit-Analyzer/compare/v0.3.0...v0.4.0
