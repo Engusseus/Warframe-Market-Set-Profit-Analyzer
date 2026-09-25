@@ -208,6 +208,29 @@ def test_write_results_to_csv_sanitizes_untrusted_text(tmp_path):
     assert row["Part Prices"].startswith("'@")
 
 
+def test_write_results_to_csv_escapes_spreadsheet_formulas(tmp_path):
+    output_path = tmp_path / "formulas.csv"
+    formula_triggers = ("=", "+", "-", "@", "\t", "\r", "\n")
+    results = []
+
+    for index, trigger in enumerate(formula_triggers):
+        result = sample_result(slug=f"{trigger}malicious_slug_{index}_prime_set")
+        result.set_data.name = f"{trigger}malicious set name"
+        first_part = next(iter(result.set_data.parts))
+        result.set_data.part_names[first_part] = f"{trigger}malicious part name"
+        results.append(result)
+
+    write_results_to_csv(results, output_path)
+
+    with output_path.open(newline="", encoding="utf-8") as handle:
+        csv_rows = list(csv.DictReader(handle))
+
+    for row, trigger in zip(csv_rows, formula_triggers, strict=True):
+        assert row["Set Name"].startswith(f"'{trigger}")
+        assert row["Set Slug"].startswith(f"'{trigger}")
+        assert row["Part Prices"].startswith(f"'{trigger}")
+
+
 def test_format_part_prices_handles_empty_parts():
     result = ResultRow(
         set_data=SetData(slug="empty", name="Empty", parts={}, part_names={}),
